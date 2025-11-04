@@ -1,0 +1,20 @@
+Projeto de CG 
+
+Autores: 
+- Leonardo Pardal 61836;
+- Pedro Carvalho 61800;
+- Afonso Henriques 618;
+
+Linguaguem escolhida - python
+
+Opengl 3.3
+GLFW, GLAD
+
+
+
+carro 
+    volante
+        rodas
+    exterior
+    
+    
