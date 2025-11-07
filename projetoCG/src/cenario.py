@@ -1,10 +1,15 @@
 # OpenGL com Shaders (>3.3)
 # Sistema solar simples : 2 planetas + 1 lua
 
-import sys, math, ctypes
+import sys, math, ctypes, os
 import numpy as np
 import glfw
 from OpenGL.GL import *
+import anim  # módulo separado com animadores (src/anim.py)
+from carro import Car  # estado físico do carro
+from camera import Camera, update_free_camera, get_view_free
+from node import Node
+from gfx import ShaderProgram, Mesh
 
 
 # Transformações matemáticas! Teêm que ser todas explicitadas
@@ -123,113 +128,7 @@ void main(){
 }
 """
 
-
-
-class ShaderProgram:
-    def __init__(self, vs_src, fs_src):
-        self.prog = glCreateProgram()
-        vs = self._compile(vs_src, GL_VERTEX_SHADER)
-        fs = self._compile(fs_src, GL_FRAGMENT_SHADER)
-        glAttachShader(self.prog, vs); glAttachShader(self.prog, fs); glLinkProgram(self.prog)
-        glDeleteShader(vs); glDeleteShader(fs)
-        if not glGetProgramiv(self.prog, GL_LINK_STATUS):
-            raise RuntimeError(glGetProgramInfoLog(self.prog).decode())
-        # Cache dos locations dos uniforms para acesso fácil
-        self.loc_uM   = glGetUniformLocation(self.prog, "uM")
-        self.loc_uVP  = glGetUniformLocation(self.prog, "uVP")
-        self.loc_uN   = glGetUniformLocation(self.prog, "uN")
-        self.loc_uAlb = glGetUniformLocation(self.prog, "uAlbedo")
-        self.loc_uAmb = glGetUniformLocation(self.prog, "uAmbient")
-        self.loc_uLD  = glGetUniformLocation(self.prog, "uLightDir")
-        self.loc_uVPs = glGetUniformLocation(self.prog, "uViewPos")
-        self.loc_uLDiff = glGetUniformLocation(self.prog, "uLightDiffuse")
-
-    #compilador
-    def _compile(self, src, kind):
-        sh = glCreateShader(kind); glShaderSource(sh, src); glCompileShader(sh)
-        if not glGetShaderiv(sh, GL_COMPILE_STATUS):
-            raise RuntimeError(glGetShaderInfoLog(sh).decode())
-        return sh
-
-    def use(self):
-        glUseProgram(self.prog)
-
-    def set_common(self, VP, view_pos, light_dir, ambient, light_diffuse):
-        #colocação das componentes da geometria e iluminação da cena nos shaders
-        glUniformMatrix4fv(self.loc_uVP, 1, GL_TRUE, VP)
-        glUniform3fv(self.loc_uVPs, 1, np.array(view_pos, dtype=np.float32))
-        glUniform3fv(self.loc_uLD,  1, np.array(light_dir, dtype=np.float32))
-        glUniform3fv(self.loc_uAmb, 1, np.array(ambient,   dtype=np.float32))
-        glUniform3fv(self.loc_uLDiff, 1, np.array(light_diffuse, dtype=np.float32))
-
-    def set_per_object(self, M, albedo):
-        glUniformMatrix4fv(self.loc_uM, 1, GL_TRUE, M)
-        glUniformMatrix3fv(self.loc_uN, 1, GL_TRUE, normal_matrix(M))
-        glUniform3fv(self.loc_uAlb, 1, np.array(albedo, dtype=np.float32))
-
-    def destroy(self):
-        glDeleteProgram(self.prog)
-
-
 # criação da geometria
-class Mesh:
-    #Interleaved [pos3, normal3] with indices. 
-    def __init__(self, interleaved: np.ndarray, indices: np.ndarray):
-        self.count = indices.size
-        self.vao = glGenVertexArrays(1)
-        self.vbo = glGenBuffers(1)
-        self.ebo = glGenBuffers(1)
-        glBindVertexArray(self.vao)
-        glBindBuffer(GL_ARRAY_BUFFER, self.vbo)
-        glBufferData(GL_ARRAY_BUFFER, interleaved.nbytes, interleaved, GL_STATIC_DRAW)
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self.ebo)
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.nbytes, indices, GL_STATIC_DRAW)
-        #dimensão de cada elemento (3 posição+3normais) x 4 bytes
-        stride = 6 * 4
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(0))
-        #2 elemento - Normais
-        glEnableVertexAttribArray(1); 
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(12))
-        glBindVertexArray(0)
-
-    def draw(self):
-        glBindVertexArray(self.vao)
-        glDrawElements(GL_TRIANGLES, self.count, GL_UNSIGNED_INT, ctypes.c_void_p(0))
-
-    def destroy(self):
-        glDeleteVertexArrays(1, [self.vao])
-        glDeleteBuffers(1, [self.vbo])
-        glDeleteBuffers(1, [self.ebo])
-
-
-# nos do Grafo de cena
-class Node:
-    def __init__(self, name="Node", local=None, mesh: Mesh=None, albedo=(1,1,1), animator=None):
-        self.name = name
-        #Aqui coloca-se a matriz de transformação local
-        self.local = np.array(local if local is not None else np.eye(4, dtype=np.float32), dtype=np.float32)
-        self.children = []
-        self.mesh = mesh
-        self.albedo = np.array(albedo, dtype=np.float32)
-        self.animator = animator  # função de animação
-
-    def add(self, *children):
-        for c in children: self.children.append(c)
-        return self
-
-    def update(self, dt):
-        if self.animator: self.animator(self, dt)
-        for c in self.children: c.update(dt)
-
-    def draw(self, shader: ShaderProgram, parent_world, VP, view_pos, light_dir, ambient):
-        #parent_world é a matriz anterior existente
-        world = parent_world @ self.local  
-        if self.mesh is not None:
-            shader.set_per_object(world, self.albedo)
-            self.mesh.draw()
-        for c in self.children:
-            c.draw(shader, world, VP, view_pos, light_dir, ambient)
 
 
 #Construção da geometria
@@ -329,6 +228,76 @@ def gen_uv_prism_flat(size=1.0, height=1.0):
     indices = np.arange(tri_pos.shape[0], dtype=np.uint32)
     return inter, indices
     
+def gen_uv_cylinder_flat(radius=0.5, half_width=0.25, slices=32):
+    """Cylinder aligned with Y axis, flat-shaded triangles.
+    - radius: cylinder radius in XZ plane
+    - half_width: half of the cylinder length along Y (total width = 2*half_width)
+    - slices: number of radial divisions (>=3)
+
+    Returns interleaved array [pos(3), normal(3)] and triangle indices.
+    """
+    slices = max(3, int(slices))
+    r = float(radius)
+    hw = float(half_width)
+
+    tri_pos = []
+    tri_nrm = []
+
+    # side quads split into two triangles each
+    for j in range(slices):
+        u0 = j / slices
+        u1 = (j + 1) / slices
+        phi0 = 2.0 * math.pi * u0
+        phi1 = 2.0 * math.pi * u1
+        x0, z0 = math.cos(phi0) * r, math.sin(phi0) * r
+        x1, z1 = math.cos(phi1) * r, math.sin(phi1) * r
+
+        p0t = np.array([x0, +hw, z0], dtype=np.float32)
+        p0b = np.array([x0, -hw, z0], dtype=np.float32)
+        p1t = np.array([x1, +hw, z1], dtype=np.float32)
+        p1b = np.array([x1, -hw, z1], dtype=np.float32)
+
+        # Tri 1 (side): p0t, p0b, p1t
+        n1 = np.cross(p0b - p0t, p1t - p0t)
+        ln = np.linalg.norm(n1); n1 = n1/ln if ln > 0 else np.array([0,1,0], dtype=np.float32)
+        tri_pos.extend([p0t, p0b, p1t]); tri_nrm.extend([n1, n1, n1])
+
+        # Tri 2 (side): p1t, p0b, p1b
+        n2 = np.cross(p0b - p1t, p1b - p1t)
+        ln = np.linalg.norm(n2); n2 = n2/ln if ln > 0 else n1
+        tri_pos.extend([p1t, p0b, p1b]); tri_nrm.extend([n2, n2, n2])
+
+    # top cap (normal +Y): fan from center_top
+    c_top = np.array([0.0, +hw, 0.0], dtype=np.float32)
+    n_top = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+    for j in range(slices):
+        phi0 = 2.0 * math.pi * (j / slices)
+        phi1 = 2.0 * math.pi * ((j + 1) / slices)
+        p0 = np.array([math.cos(phi0) * r, +hw, math.sin(phi0) * r], dtype=np.float32)
+        p1 = np.array([math.cos(phi1) * r, +hw, math.sin(phi1) * r], dtype=np.float32)
+        # CCW when viewed from +Y: center -> p0 -> p1
+        tri_pos.extend([c_top, p0, p1]); tri_nrm.extend([n_top, n_top, n_top])
+
+    # bottom cap (normal -Y): fan from center_bottom
+    c_bot = np.array([0.0, -hw, 0.0], dtype=np.float32)
+    n_bot = np.array([0.0, -1.0, 0.0], dtype=np.float32)
+    for j in range(slices):
+        phi0 = 2.0 * math.pi * (j / slices)
+        phi1 = 2.0 * math.pi * ((j + 1) / slices)
+        p0 = np.array([math.cos(phi0) * r, -hw, math.sin(phi0) * r], dtype=np.float32)
+        p1 = np.array([math.cos(phi1) * r, -hw, math.sin(phi1) * r], dtype=np.float32)
+        # CCW when viewed from -Y: center -> p1 -> p0
+        tri_pos.extend([c_bot, p1, p0]); tri_nrm.extend([n_bot, n_bot, n_bot])
+
+    tri_pos = np.array(tri_pos, dtype=np.float32).reshape(-1, 3)
+    tri_nrm = np.array(tri_nrm, dtype=np.float32).reshape(-1, 3)
+    inter = np.empty((tri_pos.shape[0], 6), dtype=np.float32)
+    inter[:, 0:3] = tri_pos
+    inter[:, 3:6] = tri_nrm
+    inter = inter.reshape(-1)
+    indices = np.arange(tri_pos.shape[0], dtype=np.uint32)
+    return inter, indices
+    
 def gen_uv_cube_flat(size=1.0):
     n = size / 2.0
     vertices = [ [ n, n, n], [ n, n,-n], [ n,-n,-n], [ n,-n, n]
@@ -392,6 +361,11 @@ def setup_window(w=1200, h=800, title="Solar System — Grafo de cena com Flat S
     if not win:
         glfw.terminate(); print("Failed to create window", file=sys.stderr); sys.exit(1)
     glfw.make_context_current(win)
+    # Usar vsync para evitar o loop a correr demasiado depressa saturando a CPU
+    try:
+        glfw.swap_interval(1)
+    except Exception:
+        pass
     return win
 
 def setup_gl_state():
@@ -399,6 +373,8 @@ def setup_gl_state():
     glEnable(GL_CULL_FACE)
     glCullFace(GL_BACK)
     glFrontFace(GL_CCW)
+
+
 
 
 # Forma extensível de construir a cena: cria internamente os meshes
@@ -418,15 +394,14 @@ def build_scene(meshes: dict = None):
     car = Node("Car")
     # Orientação do carro: comprimento ao longo do eixo X, largura ao longo de Z
     # A geometria do corpo foi orientada por índices para X, por isso não é necessário rodar +90° em Y aqui.
+    # Re-posicionar: manter chão em y=0 e corpo do carro elevando pelas rodas
     car_body = Node(
         "CarBody",
-        local=translate(0, -2, 0)
-              @ rotate(math.pi/6, (0,1,0))   # ligeiro yaw para leitura melhor
-              @ scale(3, 1, 1),
+        local=translate(0, 0.55, 0) @ scale(4.2, 0.9, 2.0),
         mesh=car_mesh,
         albedo=COL_CAR
     )
-    floor    = Node("Floor", local=translate(0, -6, 0) @ scale(50, 0.1, 50), mesh=plane_mesh, albedo=COL_FLOOR)
+    floor    = Node("Floor", local=translate(0, 0, 0) @ scale(50, 0.1, 50), mesh=plane_mesh, albedo=COL_FLOOR)
 
     root = Node("Root")
     root.add(floor, car)
@@ -446,8 +421,7 @@ def gen_uv_car_body(size=1.0):
 
 
     topo = [
-        # Triângulo capô (frente) em x=+n (normal +X)
-        [ n, n, -roof_half], [ n, n,  roof_half], [ n, altura_topo, 0.0],  # 8-10
+        # (Removido capô frontal) Mantemos só a traseira em x=-n
         # Triângulo traseira em x=-n (normal -X)
         [-n, n, -roof_half], [-n, n,  roof_half], [-n, altura_topo, 0.0],  # 11-13
         # Quadrado central (teto plano), quadrado de lado 2*roof_half
@@ -473,13 +447,14 @@ def gen_uv_car_body(size=1.0):
         1,2,6, 1,6,5,
         # z = +n (frente) normal +Z
         0,4,7, 7,3,0,
-        # Topo: triângulos capô e traseira (agora ao longo de X)
-        # capô (x=+n) normal +X
-        9,8,10,
-        # traseira (x=-n) normal -X
-        11,12,13,
+    # Topo: apenas triângulo traseira (ao longo de X negativo)
+    # traseira (x=-n) normal -X  (novos índices 8,9,10)
+    8,9,10,
+    # face traseira em ambas as faces (duplicar tri com ordem inversa)
+    10,9,8,
         # Teto plano (quadrado central) normal +Y (ordem CCW vista de +Y)
-        14,15,16, 14,16,17
+        # novos índices 11,12,13,14
+        11,12,13, 11,13,14
     ]
 
 
@@ -514,8 +489,10 @@ def main():
     win = setup_window()
     setup_gl_state()
 
-    #aqui só teremos um shader
-    shader = ShaderProgram(VS, FS)
+    #aqui só teremos um shader (carregado dos ficheiros em src/shaders)
+    vs_path = os.path.join(os.path.dirname(__file__), 'shaders', 'basic.vert')
+    fs_path = os.path.join(os.path.dirname(__file__), 'shaders', 'basic.frag')
+    shader = ShaderProgram.from_files(vs_path, fs_path)
     inter, idx = gen_uv_plane_flat(size=1.0, divisions=10)
     plane_mesh = Mesh(inter, idx)
     inter, idx = gen_uv_car_body(size=1.0)
@@ -524,23 +501,104 @@ def main():
     resources = [car_mesh, plane_mesh]
     root = build_scene(meshes=mesh_dict)
 
+    # --- ligar controlador do carro e criar rodas (placeholders) ---
+    car = find_node_by_name(root, "Car")
+    if car is None:
+        raise RuntimeError("Node 'Car' não encontrado. Confirma o nome no build_scene().")
+
+    # Mesh de roda cilíndrica (unitária). O anim aplica a escala real.
+    inter, idx = gen_uv_cylinder_flat(radius=1.0, half_width=0.5, slices=32)
+    wheel_mesh = Mesh(inter, idx)
+    resources.append(wheel_mesh)
+
+    # Offsets aproximados (X frente, Z direita, Y cima)
+    wheel_radius = 0.55
+    wheel_width  = 0.30
+    # Offsets com Y positivo para pousar no chão (y ~= radius)
+    x_off, z_off, y_off = 2.3, 1.2, wheel_radius
+
+    def make_wheel(name, ox, oy, oz):
+        return Node(
+            name,
+            local=translate(ox, oy, oz) @ scale(wheel_radius, wheel_radius, wheel_width),
+            mesh=wheel_mesh,
+            albedo=(0.05, 0.05, 0.05)
+        )
+
+    wheels = {
+        "Wheel_FL": make_wheel("Wheel_FL", +x_off, y_off, -z_off),
+        "Wheel_FR": make_wheel("Wheel_FR", +x_off, y_off, +z_off),
+        "Wheel_RL": make_wheel("Wheel_RL", -x_off, y_off, -z_off),
+        "Wheel_RR": make_wheel("Wheel_RR", -x_off, y_off, +z_off),
+    }
+    car.add(*wheels.values())
+
+    # Estado lógico do carro
+    car_state = Car()
+
+    # Criar animador único que trata chassis + rodas
+    car.animator = anim.make_car_animators(
+        win=win,
+        car_state=car_state,
+        car_node=car,
+        wheel_nodes=wheels,
+        translate=translate, rotate=rotate, scale=scale,
+    )
+
+    # Camera a seguir o carro (offset atrás e acima, com smoothing)
+    # Camera atrás do carro (e um pouco acima). Para frente = +X, usar offset X negativo.
+    follow_cam = anim.make_follow_camera(
+        lambda: car.local.copy(),
+        offset_local=(-12.0, 4.0, 0.0),
+        look_ahead=8.0,
+        lag_seconds=0.18,
+    )
+    # Estado da camera livre
+    cam = Camera()
+
     # dados globais da cena, camara e luz
-    eye = np.array([0.0, 0.0, 22.0], dtype=np.float32)
     up  = np.array([0.0, 1.0, 0.0], dtype=np.float32)
 
-    ambient       = np.array([0.38, 0.38, 0.32], dtype=np.float32)    # GL_AMBIENT
-    light_diffuse = np.array([1.0, 1.0, 1.0], dtype=np.float32)    # GL_DIFFUSE
+    ambient       = np.array([0.38, 0.38, 0.32], dtype=np.float32)   
+    light_diffuse = np.array([1.0, 1.0, 1.0], dtype=np.float32)  
 
-    # Equivalente a  glLightfv(GL_POSITION, (0, 2, 1, 0))  -> luz direccional
+
     light_dir = np.array([0.45, 0.9, 0.35], dtype=np.float32)
     light_dir /= np.linalg.norm(light_dir)
 
 
 
     #controlo (com glfw)
+    show_debug = False
+    debug_accum = 0.0
+
     def on_key(win, key, sc, action, mods):
-        if action in (glfw.PRESS, glfw.REPEAT) and key == glfw.KEY_ESCAPE:
-            glfw.set_window_should_close(win, True)
+        nonlocal show_debug, cam
+        if action in (glfw.PRESS, glfw.REPEAT):
+            if key == glfw.KEY_ESCAPE:
+                glfw.set_window_should_close(win, True)
+            elif key == glfw.KEY_F1 and action == glfw.PRESS:
+                show_debug = not show_debug
+            elif key == glfw.KEY_P and action == glfw.PRESS:
+                # Toggle camera mode. If switching to free, re-seed free cam from current follow view
+                new_mode = 'free' if cam.mode != 'free' else 'follow'
+                if new_mode == 'free':
+                    # Amostrar a posição atual da follow cam e orientar a free cam igual
+                    eye, ctr = follow_cam(0.0)
+                    dirv = ctr - eye
+                    n = np.linalg.norm(dirv)
+                    if n > 1e-6:
+                        dirv = dirv / n
+                    # yaw = atan2(z, x), pitch = asin(y)
+                    yaw = math.atan2(dirv[2], dirv[0])
+                    yclamped = max(-1.0, min(1.0, float(dirv[1])))
+                    pitch = math.asin(yclamped)
+                    cam.pos = eye.astype(np.float32)
+                    cam.yaw = yaw
+                    cam.pitch = pitch
+                    cam._looking = False
+                    cam._last_mouse = None
+                cam.mode = new_mode
 
     glfw.set_key_callback(win, on_key) #definir o call back do teclado
     t_prev = glfw.get_time()
@@ -555,26 +613,36 @@ def main():
         # actualização do grafo de cena
         root.update(dt)
 
+        # Debug opcional do estado do carro (F1 para alternar)
+        if show_debug:
+            debug_accum += dt
+            if debug_accum >= 0.25:  # imprime a cada ~0.25s
+                debug_accum = 0.0
+                print(f"Car: x={car_state.x:.2f} z={car_state.z:.2f} yaw={math.degrees(car_state.yaw):.1f}° v={car_state.v:.2f} steer={math.degrees(car_state.steer):.1f}°")
+
 
         #definição das transformações até ao viewport (perspectivca e vista)
         fbw, fbh = glfw.get_framebuffer_size(win)
         glViewport(0,0,fbw,fbh)
         P  = perspective(35.0, max(fbw,1) / float(max(fbh,1)), 0.1, 1000.0)
 
-        I = np.eye(4, dtype=np.float32)
-        eye_rot = (I @ np.array([eye[0], eye[1], eye[2], 1.0], dtype=np.float32))[:3]
-        V  = lookAt(eye_rot, np.array([0,0,0], dtype=np.float32), up)
+        # Seleciona modo de camera
+        if cam.mode == 'free':
+            update_free_camera(win, cam, dt)
+            cam_eye, cam_ctr = get_view_free(cam)
+        else:
+            cam_eye, cam_ctr = follow_cam(dt)
+        V  = lookAt(cam_eye, cam_ctr, up)
         VP = P @ V
 
         glClearColor(0.05, 0.05, 0.25, 1.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
         shader.use()
-        #shader.set_common(VP, eye_rot, light_dir, ambient)
-        shader.set_common(VP, eye_rot, light_dir, ambient, light_diffuse)
+        shader.set_common(V, P, light_dir)
 
         # Desenhar tudo
-        root.draw(shader, np.eye(4, dtype=np.float32), VP, eye_rot, light_dir, ambient)
+        root.draw(shader, np.eye(4, dtype=np.float32), None, cam_eye, light_dir, ambient)
 
         glfw.swap_buffers(win)
 
@@ -586,6 +654,44 @@ def main():
             pass
     shader.destroy()
     glfw.terminate()
+
+
+
+
+
+
+def find_node_by_name(node, name):
+    if node.name == name:
+        return node
+    for c in node.children:
+        r = find_node_by_name(c, name)
+        if r is not None:
+            return r
+    return None
+
+def apply_transform_local_by_name(root, node_name, M, pre=True):
+    node = find_node_by_name(root, node_name)
+    if node is None:
+        raise RuntimeError(f"Node '{node_name}' não encontrado.")
+    node.local = (M @ node.local) if pre else (node.local @ M)
+    return node
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 if __name__ == "__main__":
