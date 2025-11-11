@@ -65,12 +65,14 @@ def update_free_camera(win, cam: Camera, dt: float) -> None:
     right = np.array([math.cos(cam.yaw + math.pi/2.0), 0.0, math.sin(cam.yaw + math.pi/2.0)], dtype=np.float32)
     up = np.array([0.0, 1.0, 0.0], dtype=np.float32)
     v = np.zeros(3, dtype=np.float32)
+    
     if glfw.get_key(win, glfw.KEY_W) in (glfw.PRESS, glfw.REPEAT): v += fwd
     if glfw.get_key(win, glfw.KEY_S) in (glfw.PRESS, glfw.REPEAT): v -= fwd
     if glfw.get_key(win, glfw.KEY_D) in (glfw.PRESS, glfw.REPEAT): v += right
     if glfw.get_key(win, glfw.KEY_A) in (glfw.PRESS, glfw.REPEAT): v -= right
     if glfw.get_key(win, glfw.KEY_E) in (glfw.PRESS, glfw.REPEAT): v += up
     if glfw.get_key(win, glfw.KEY_Q) in (glfw.PRESS, glfw.REPEAT): v -= up
+
     n = np.linalg.norm(v)
     if n > 0:
         v = v / n

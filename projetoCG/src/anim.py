@@ -22,8 +22,6 @@ def make_car_animators(
 	wheel_nodes: Dict[str, any],  # {'FL':Node, 'FR':Node, ...}
 	translate, rotate, scale,
 ) -> Callable[[float], None]:
-
-
 	def apply_transforms():
 		M_car = translate(car_state.x, 0.0, car_state.z) @ rotate(-car_state.yaw, (0,1,0))
 		car_node.local = M_car 

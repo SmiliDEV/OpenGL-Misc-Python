@@ -9,7 +9,7 @@ class Node:
         self.mesh = mesh
         self.albedo = np.array(albedo, dtype=np.float32)
         self.animator = animator  # função de animação
-
+    
     def add(self, *children):
         for c in children: self.children.append(c)
         return self
