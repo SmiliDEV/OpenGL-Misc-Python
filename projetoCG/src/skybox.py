@@ -1,21 +1,21 @@
 import os
-from texture import TextureCube
 from OpenGL.GL import *
-from gfx import *
+import glm
 import numpy as np
+from PIL import Image
+from glib import *
+from file import get_content_of_file_project
 
 class Skybox:
     def __init__(self):
-        self.texture = TextureCube([
-            os.path.join(os.path.dirname(__file__), 'textures', 'skybox', 'right.jpg'),
-           os.path.join(os.path.dirname(__file__), 'textures', 'skybox', 'left.jpg'),
-           os.path.join(os.path.dirname(__file__), 'textures', 'skybox', 'top.jpg'),
-           os.path.join(os.path.dirname(__file__), 'textures', 'skybox', 'bottom.jpg'),
-           os.path.join(os.path.dirname(__file__), 'textures', 'skybox', 'front.jpg'),
-           os.path.join(os.path.dirname(__file__), 'textures', 'skybox', 'back.jpg'),
-       ])
-        self.skyboxShader = wrapperCreateShader('skybox')
-        self.skyboxVertices = np.array([
+        self.cubemap_tex = self.load_cubemap('textures/skybox')
+        
+        vs_src = get_content_of_file_project('shaders/skybox.vert')
+        fs_src = get_content_of_file_project('shaders/skybox.frag')
+        shader = Shader(vs_src, fs_src)
+        self.skybox_program = shader.prog
+
+        self.skybox_vertices = np.array([
             -1.0,  1.0, -1.0,
             -1.0, -1.0, -1.0,
             1.0, -1.0, -1.0,
@@ -59,58 +59,69 @@ class Skybox:
             1.0, -1.0,  1.0
         ], dtype=np.float32)
 
-        self.skyboxVAO = glGenVertexArrays(1)
-        self.skyboxVBO = glGenBuffers(1)
-        glBindVertexArray(self.skyboxVAO)
-        glBindBuffer(GL_ARRAY_BUFFER, self.skyboxVBO)
-        glBufferData(GL_ARRAY_BUFFER, self.skyboxVertices.nbytes, self.skyboxVertices, GL_STATIC_DRAW)
+        self.skybox_vao = glGenVertexArrays(1)
+        self.skybox_vbo = glGenBuffers(1)
+        glBindVertexArray(self.skybox_vao)
+        glBindBuffer(GL_ARRAY_BUFFER, self.skybox_vbo)
+        glBufferData(GL_ARRAY_BUFFER, self.skybox_vertices.nbytes, self.skybox_vertices, GL_STATIC_DRAW)
         glEnableVertexAttribArray(0)
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * 4, 0)
-
-        glBindBuffer(GL_ARRAY_BUFFER, 0)
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * 4, ctypes.c_void_p(0))
         glBindVertexArray(0)
 
-        self.skyboxShader.use()
-        # sampler should be set to the texture unit index (0), not the GL texture id
-        self.skyboxShader.setInt("skybox", self.texture.id)
-        # diagnostic info
-        try:
-            print(f"Skybox: texture id={self.texture.id} VAO={self.skyboxVAO} VBO={self.skyboxVBO} shader_prog={self.skyboxShader.prog}")
-            print(f"  vertex_count={len(self.skyboxVertices)//3}")
-        except Exception:
-            pass
-        self._did_log_draw = False
-    
+        glUseProgram(self.skybox_program)
+        loc = glGetUniformLocation(self.skybox_program, 'skybox')
+        if loc != -1:
+            glUniform1i(loc, 0)
+        glUseProgram(0)
+
+    def load_cubemap(self, folder):
+        bases = ["right", "left", "top", "bottom", "front", "back"]
+
+        files = os.listdir(folder)
+        if not files:
+            raise FileNotFoundError(f"No files found in {folder}")
+
+        faces = []
+        for b in bases:
+            found = None
+            for ext in ('.png', '.jpg', '.jpeg', '.bmp'):
+                candidate = f"{b}{ext}"
+                if candidate in files:
+                    found = os.path.join(folder, candidate)
+                    break
+            if found is None:
+                for f in files:
+                    if f.lower().startswith(b.lower()):
+                        found = os.path.join(folder, f)
+                        break
+            if found is None:
+                raise FileNotFoundError(f"Could not find texture for face '{b}' in {folder}. Found: {files}")
+            faces.append(found)
+
+        tex_id = glGenTextures(1)
+        glBindTexture(GL_TEXTURE_CUBE_MAP, tex_id)
+
+        for i, face in enumerate(faces):
+            img = Image.open(face).convert('RGB')
+            img_data = img.tobytes()
+            width, height = img.size
+            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, img_data)
+
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE)
+
+        return tex_id
+
     def draw(self, view, projection):
-        if not self._did_log_draw:
-            print("Skybox.draw called (first frame)")
-            self._did_log_draw = True
-        # DEBUG: force draw regardless of depth to rule out depth/state issues
-        glDepthFunc(GL_ALWAYS)
-        glDisable(GL_DEPTH_TEST)
-        self.skyboxShader.use()
-        # remove translation from the view matrix
-        # remove translation from the view matrix without glm
-        view_mat = np.array(view, dtype=np.float32)
-        if view_mat.size == 16:
-            view_mat = view_mat.reshape((4, 4))
-        view_mat = view_mat.copy()
-        view_mat[:3, 3] = 0.0
-        view_mat[3, :3] = 0.0
-        view_mat[3, 3] = 1.0
-        view = view_mat
-        self.skyboxShader.setMat4("view", view)
-        self.skyboxShader.setMat4("projection", projection)
-        glBindVertexArray(self.skyboxVAO)
+        glDepthFunc(GL_LEQUAL)
+        glUseProgram(self.skybox_program)
+        glBindVertexArray(self.skybox_vao)
         glActiveTexture(GL_TEXTURE0)
-        glBindTexture(GL_TEXTURE_CUBE_MAP, self.texture.id)
-        # don't write to depth buffer when drawing the skybox
-        glDepthMask(GL_FALSE)
-        glDisable(GL_CULL_FACE)
+        glBindTexture(GL_TEXTURE_CUBE_MAP, self.cubemap_tex)
         glDrawArrays(GL_TRIANGLES, 0, 36)
-        glEnable(GL_CULL_FACE)
-        glDepthMask(GL_TRUE)
         glBindVertexArray(0)
-        # restore depth state
-        glEnable(GL_DEPTH_TEST)
+        glUseProgram(0)
         glDepthFunc(GL_LESS)

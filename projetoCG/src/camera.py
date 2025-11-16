@@ -7,21 +7,48 @@ from typing import Optional, Tuple
 import glfw
 import numpy as np
 
+# remove this
+import glm
 
 @dataclass
 class Camera:
     mode: str = "free"
-    pos: np.ndarray = None  
-    yaw: float = math.radians(35.0)
-    pitch: float = math.radians(-15.0)
-    speed: float = 8.0
-    mouse_sens: float = math.radians(0.12)
-    _last_mouse: Optional[Tuple[float, float]] = None
-    _looking: bool = False
+    
+    def __init__(self, pos=glm.vec3(0,0,3), yaw=-90.0, pitch=0.0):
+        self.pos = pos
+        self.yaw = yaw
+        self.pitch = pitch
+        self.front = glm.vec3(0,0,-1)
+        self.up = glm.vec3(0,1,0)
+        self.right = glm.vec3(1,0,0)
+        self.speed = 2.5
+        self.sensitivity = 0.1
 
-    def __post_init__(self):
-        if self.pos is None:
-            self.pos = np.array([-6.0, 4.0, -8.0], dtype=np.float32)
+        self._update_vectors()
+
+    def _update_vectors(self):
+        yaw_r = glm.radians(self.yaw)
+        pitch_r = glm.radians(self.pitch)
+        front = glm.vec3(
+            glm.cos(yaw_r) * glm.cos(pitch_r),
+            glm.sin(pitch_r),
+            glm.sin(yaw_r) * glm.cos(pitch_r)
+        )
+        self.front = glm.normalize(front)
+        self.right = glm.normalize(glm.cross(self.front, glm.vec3(0,1,0)))
+        self.up = glm.normalize(glm.cross(self.right, self.front))
+
+    def get_view(self):
+        return glm.lookAt(self.pos, self.pos + self.front, self.up)
+    
+    def update(self, xoffset, yoffset):
+        self.yaw += xoffset
+        self.pitch += yoffset
+        if self.pitch > 89.0:
+            self.pitch = 89.0
+        if self.pitch < -89.0:
+            self.pitch = -89.0
+        self._update_vectors()
 
 
 def _clamp(x: float, a: float, b: float) -> float:
