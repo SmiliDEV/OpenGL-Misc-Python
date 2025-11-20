@@ -195,6 +195,15 @@ def gen_uv_cube_flat(size=1.0):
     indices = np.arange(tri_pos.shape[0], dtype=np.uint32)
     return inter, indices
 
+
+def gen_skybox_mesh(size: float = 1.0):
+    """
+    Convenience helper that returns interleaved array and indices for a unit cube
+    suitable for a skybox. Uses `gen_uv_cube_flat` under the hood so the
+    returned interleaved layout is compatible with the existing `Mesh` helper.
+    """
+    return gen_uv_cube_flat(size=size)
+
 def gen_uv_plane_flat(size=1.0, divisions=10):
     step = size / divisions
     half = size / 2.0
@@ -225,6 +234,8 @@ def gen_uv_plane_flat(size=1.0, divisions=10):
     tri_pos = np.array(tri_pos, dtype=np.float32).reshape(-1,3)
     tri_nrm = np.array(tri_nrm, dtype=np.float32).reshape(-1,3)
     tri_uv = np.array(tri_uv, dtype=np.float32).reshape(-1,2)
+    # flip V coordinate to match loader convention (textures were flipped on load)
+    tri_uv[:,1] = 1.0 - tri_uv[:,1]
     inter = np.empty((tri_pos.shape[0], 8), dtype=np.float32)
     inter[:,0:3] = tri_pos; inter[:,3:6] = tri_nrm; inter[:,6:8] = tri_uv
     inter = inter.reshape(-1)

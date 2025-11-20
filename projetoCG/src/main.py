@@ -1,5 +1,4 @@
 # OpenGL com Shaders (>3.3)
-# Sistema solar simples : 2 planetas + 1 lua
 
 import sys, math, ctypes, os
 import numpy as np
@@ -10,13 +9,14 @@ from carro import Car  # estado físico do carro
 from camera import Camera, update_free_camera, get_view_free
 from node import Node
 from gfx import MeshTextured, ShaderProgram, Mesh, wrapperCreateShader
-from myglm import *
+from math3d import *
 from geo import *
-from skybox import Skybox
+from skybox import Skybox, draw_skybox_loader
+from renderer import Renderer
 from texture import *
-import glm
 from window import Window
 from glib import *
+from material import Material
 
 width = 800
 height = 600
@@ -24,6 +24,7 @@ height = 600
 cam = Camera()
 last_x, last_y = width / 2, height / 2
 first_mouse = True
+follow_cam = None
 
 def mouse_camera_callback(window, xpos, ypos):
     global last_x, last_y, first_mouse, cam
@@ -37,30 +38,27 @@ def mouse_camera_callback(window, xpos, ypos):
     last_x = xpos
     last_y = ypos
 
-    xoffset *= cam.sensitivity
-    yoffset *= cam.sensitivity
-    
-    cam.update(xoffset, yoffset)
+    # only apply mouse-look when the free camera is actively looking (RMB held)
+    if getattr(cam, '_looking', False):
+        xoffset *= cam.mouse_sens
+        yoffset *= cam.mouse_sens
+        cam.yaw += xoffset
+        cam.pitch -= yoffset
+        cam.pitch = max(math.radians(-85.0), min(math.radians(85.0), cam.pitch))
 
 
-follow_cam = anim.make_follow_camera(
-    lambda: car.local.copy(),
-    offset_local=(-12.0, 4.0, 0.0),
-    look_ahead=8.0,
-    lag_seconds=0.18,
-)
+# follow_cam will be created inside main() after the scene (and `car`) exist
 
 def on_key(win, key, sc, action, mods):
+    global follow_cam, cam
     if action in (glfw.PRESS, glfw.REPEAT):
         if key == glfw.KEY_ESCAPE:
             glfw.set_window_should_close(win, True)
-        elif key == glfw.KEY_F1 and action == glfw.PRESS:
-            show_debug = not show_debug
         elif key == glfw.KEY_P and action == glfw.PRESS:
             # Toggle camera mode. If switching to free, re-seed free cam from current follow view
             new_mode = 'free' if cam.mode != 'free' else 'follow'
-            if new_mode == 'free':
-                # Amostrar a posição atual da follow cam e orientar a free cam igual
+            if new_mode == 'free' and follow_cam is not None:
+                # Sample the current follow camera position and orient the free cam to match
                 eye, ctr = follow_cam(0.0)
                 dirv = ctr - eye
                 n = np.linalg.norm(dirv)
@@ -86,39 +84,69 @@ def setup_gl_state():
     glCullFace(GL_BACK)
     glFrontFace(GL_CCW)
 
-# Forma extensível de construir a cena: cria internamente os meshes
-def build_scene(meshes: dict = None):
-    if meshes is None:
-        meshes = {}
-    # materiais simples
-    COL_CAR   = (0.15, 0.15, 0.18)
-    COL_FLOOR = (0.20, 0.80, 0.20)
-    COL_TOP   = (0.8, 0.1, 0.1)
-    car_mesh = meshes.get('car', None)
-    if car_mesh is None:
-        raise ValueError("Car mesh not provided in mesh dictionary")
-    plane_mesh = meshes.get('plane', None)
-    if plane_mesh is None:
-        raise ValueError("Plane mesh not provided in mesh dictionary")
-    car = Node("Car")
-    # Orientação do carro: comprimento ao longo do eixo X, largura ao longo de Z
-    # A geometria do corpo foi orientada por índices para X, por isso não é necessário rodar +90° em Y aqui.
-    # Re-posicionar: manter chão em y=0 e corpo do carro elevando pelas rodas
-    car_body = Node(
-        "CarBody",
-        local=translate(0, 0.55, 0) @ scale(4.2, 0.9, 2.0),
-        mesh=car_mesh,
-        albedo=COL_CAR
-    )
-    floor = Node("Floor", local=translate(0, 0, 0) @ scale(50, 0.1, 50), mesh=plane_mesh, albedo=COL_FLOOR)
+def build_scene(meshes: dict, materials: dict):
+    """Constructs scene graph from provided meshes and materials.
 
-    root = Node("Root")
-    root.add(floor, car)
-    car.add(car_body)
-    return root
+    Returns (root, nodes) where `nodes` is a dict with named node references
+    for easy access (car, car_body, floor, wheels, skybox).
+    """
+    # ensure required meshes exist
+    if 'car' not in meshes or 'plane' not in meshes:
+        raise ValueError("meshes must include at least 'car' and 'plane'")
+
+    car_mesh = meshes.get('car')
+    plane_mesh = meshes.get('plane')
+    wheel_mesh = meshes.get('wheel', None)
+
+    root = Node('Root')
+
+    # Floor
+    floor_node = Node('Floor', local=translate(0, 0, 0) @ scale(50, 0.1, 50), mesh=plane_mesh)
+    if 'floor' in materials:
+        floor_node.material = materials['floor']
+
+    # Car and body
+    car_node = Node('Car')
+    car_body = Node('CarBody', local=translate(0, 2.00, 0) @ scale(4.2, 0.9, 2.0), mesh=car_mesh)
+    if 'car' in materials:
+        car_body.material = materials['car']
+
+    car_node.add(car_body)
+    root.add(floor_node, car_node)
+
+    # Wheels
+    wheels = {}
+    if wheel_mesh is not None:
+        wheel_radius = 0.55
+        wheel_width = 0.30
+        x_off, z_off, y_off = 2.3, 1.2, wheel_radius
+
+        def make_wheel(name, ox, oy, oz):
+            n = Node(name, local=translate(ox, oy, oz) @ scale(wheel_radius, wheel_radius, wheel_width), mesh=wheel_mesh)
+            if 'wheel' in materials:
+                n.material = materials['wheel']
+            return n
+
+        wheels = {
+            'Wheel_FL': make_wheel('Wheel_FL', +x_off, y_off, -z_off),
+            'Wheel_FR': make_wheel('Wheel_FR', +x_off, y_y := y_off, +z_off),
+            'Wheel_RL': make_wheel('Wheel_RL', -x_off, y_off, -z_off),
+            'Wheel_RR': make_wheel('Wheel_RR', -x_off, y_off, +z_off),
+        }
+        car_node.add(*wheels.values())
+
+    nodes = {
+        'root': root,
+        'car': car_node,
+        'car_body': car_body,
+        'floor': floor_node,
+        'wheels': wheels,
+        
+    }
+    return root, nodes
 
 def main():
-    window = Window(800, 600, "Solar System — Grafo de cena com Flat Shading (OpenGL 3.3)")
+    window = Window(800, 600, "Carro na rua — Grafo de cena com Flat Shading (OpenGL 3.3)")
     window.mouse_router.register(mouse_camera_callback)
     window.key_router.register(on_key)
     glfw.set_framebuffer_size_callback(window.win, framebuffer_size_callback)
@@ -126,94 +154,89 @@ def main():
 
     uboPV = UniformBuffer(np.zeros(2 * 16, dtype=np.float32))  # espaço para 2 matrizes 4x4 (P e V)
 
-    #skybox
-    skybox = Skybox()
-    # bind UBO to shader uniform block 'Matrices' (binding point 0)
-    try:
-        binding_point = 0
-        block_idx = glGetUniformBlockIndex(skybox.skybox_program, 'Matrices')
-        if block_idx != GL_INVALID_INDEX:
-            glUniformBlockBinding(skybox.skybox_program, block_idx, binding_point)
-            # bind the buffer range to the same binding point
-            uboPV.bind(binding_point)
-    except Exception:
-        # don't fail if UBO binding isn't supported for some reason
-        pass
-
     #aqui só teremos um shader (carregado dos ficheiros em src/shaders)
     vs_path = os.path.join(os.path.dirname(__file__), 'shaders', 'basic.vert')
     fs_path = os.path.join(os.path.dirname(__file__), 'shaders', 'basic.frag')
-
     shader = ShaderProgram.from_files(vs_path, fs_path)
-
     floor_shader = wrapperCreateShader('floor')
     floor_shader.setInt('texture1', 0)  # textura no slot 0
     
+
+    # criar meshes 
+    #chao 
     inter, idx = gen_uv_plane_flat(size=1.0, divisions=10)
     texture_floor = Texture(os.path.join(os.path.dirname(__file__), 'textures', 'floor.jpg'))
     plane_mesh = MeshTextured(inter, idx, texture=texture_floor)
-
+    # Mesh do carro 
     inter, idx = gen_uv_car_body(size=1.0)
     car_mesh = Mesh(inter, idx)
-    
-    mesh_dict = {'car': car_mesh, 'plane': plane_mesh}
-    
-    resources = [car_mesh, plane_mesh]
-    root = build_scene(meshes=mesh_dict)
-    
-    # --- ligar controlador do carro e criar rodas (placeholders) ---
-    car = find_node_by_name(root, "Car")
-    if car is None:
-        raise RuntimeError("Node 'Car' não encontrado. Confirma o nome no build_scene().")
-
     # Mesh de roda cilíndrica (unitária). O anim aplica a escala real.
-    inter, idx = gen_uv_cylinder_flat(radius=1.0, half_width=0.5, slices=32)
-    wheel_mesh = Mesh(inter, idx)
-    resources.append(wheel_mesh)
-
-    # Offsets aproximados (X frente, Z direita, Y cima)
-    wheel_radius = 0.55
-    wheel_width  = 0.30
-    # Offsets com Y positivo para pousar no chão (y ~= radius)
-    x_off, z_off, y_off = 2.3, 1.2, wheel_radius
-
-    def make_wheel(name, ox, oy, oz):
-        return Node(
-            name,
-            local=translate(ox, oy, oz) @ scale(wheel_radius, wheel_radius, wheel_width),
-            mesh=wheel_mesh,
-            albedo=(0.05, 0.05, 0.05)
-        )
-
-    wheels = {
-        "Wheel_FL": make_wheel("Wheel_FL", +x_off, y_off, -z_off),
-        "Wheel_FR": make_wheel("Wheel_FR", +x_off, y_off, +z_off),
-        "Wheel_RL": make_wheel("Wheel_RL", -x_off, y_off, -z_off),
-        "Wheel_RR": make_wheel("Wheel_RR", -x_off, y_off, +z_off),
+    inter_w, idx_w = gen_uv_cylinder_flat(radius=1.0, half_width=0.5, slices=32)
+    wheel_mesh = Mesh(inter_w, idx_w)
+    # small sphere mesh for visualizing lights
+    inter_s, idx_s = gen_uv_sphere_flat(radius=1.0, stacks=12, slices=24)
+    sphere_mesh = Mesh(inter_s, idx_s)
+    # Skybox is handled externally (not part of scene graph)
+    mesh_dict = {'car': car_mesh, 'plane': plane_mesh, 'wheel': wheel_mesh}
+    resources = [car_mesh, plane_mesh, wheel_mesh, sphere_mesh]
+    COL_CAR = (0.8,0.1,0.1)
+    COL_WHEEL = (0.1,0.1,0.1)
+    materials = {
+        'car' : Material.from_color(shader,COL_CAR),
+        'floor': Material.from_texture(floor_shader,texture_floor)
     }
-    car.add(*wheels.values())
+    if wheel_mesh is not None:
+        materials['wheel'] = Material.from_color(shader, COL_WHEEL)
+
+    root, nodes = build_scene(meshes=mesh_dict, materials=materials)
+
+    # locate the Car node and wheel nodes returned by builder
+    car_node = nodes.get('car')
+    if car_node is None:
+        raise RuntimeError("Car node not found in scene after build_scene()")
+
+    wheel_nodes = nodes.get('wheels', {})
+
+    # assign materials to Car and Floor nodes so drawing is automatic via root.draw()
+    car_node.material = Material.from_color(shader, COL_CAR)
+    floor_node = root.find('Floor')
+    if floor_node is not None:
+        # floor is textured: create a material that references the floor shader and texture
+        floor_mat = Material.from_texture(floor_shader, texture_floor)
+        floor_node.material = floor_mat
 
     # Estado lógico do carro
     car_state = Car()
 
     # Criar animador único que trata chassis + rodas
-    car.animator = anim.make_car_animators(
+    # attach the car animator to the Car node
+    car_node.animator = anim.make_car_animators(
         win=window,
         car_state=car_state,
-        car_node=car,
-        wheel_nodes=wheels,
+        car_node=car_node,
+        wheel_nodes=wheel_nodes,
         translate=translate, rotate=rotate, scale=scale,
     )
 
     # Camera a seguir o carro (offset atrás e acima, com smoothing)
     # Camera atrás do carro (e um pouco acima). Para frente = +X, usar offset X negativo.
+    global follow_cam
     follow_cam = anim.make_follow_camera(
-        lambda: car.local.copy(),
+        lambda: car_node.local.copy(),
         offset_local=(-12.0, 4.0, 0.0),
         look_ahead=8.0,
         lag_seconds=0.18,
     )
     
+    # create a Sun node (visualized by a small sphere) and mark it as a light source
+    sun_node = Node('Sun', local=translate(0.0, 9.0, 2.0) @ scale(0.6, 0.6, 0.6), mesh=sphere_mesh)
+    sun_node.is_light = True
+    sun_node.light_color = np.array([1.0, 0.95, 0.8], dtype=np.float32)
+    sun_node.light_intensity = 2.0
+    # give it a bright material so it's visible
+    sun_node.material = Material.from_color(shader, (1.0, 0.95, 0.8))
+    root.add(sun_node)
+
 
     # dados globais da cena, camara e luz
     up  = np.array([0.0, 1.0, 0.0], dtype=np.float32)
@@ -228,8 +251,16 @@ def main():
 
 
     #controlo (com glfw)
-    show_debug = False
-    debug_accum = 0.0
+    # debug variables removed
+
+    # skybox loader (external to scene graph)
+    try:
+        sky = Skybox()
+    except Exception:
+        sky = None
+
+    # instantiate renderer once (avoid recreating per-frame)
+    renderer = Renderer()
 
     last_time = glfw.get_time()
 
@@ -243,51 +274,84 @@ def main():
         last_time = current_time
 
         fbw, fbh = window.get_framebuffer_size()
-        P  = glm.perspective(glm.radians(45.0), fbw / fbh, 0.1, 100.0)  
-        V  = cam.get_view()
-        
+
+        # Seleciona modo de camera — atualizar a free cam se necessário
+        if cam.mode == 'free':
+            update_free_camera(window, cam, delta)
+            cam_eye, cam_ctr = get_view_free(cam)
+        else:
+            cam_eye, cam_ctr = follow_cam(delta)
+
+        # construir matrizes de projeção e vista com NumPy (column-major for GL)
+        P = perspective(math.radians(45.0), float(fbw) / float(fbh), 0.1, 100.0)
+        V = lookAt(cam_eye, cam_ctr, up)
+
         # upload projection and view into the UBO using column-major float arrays
-        # glm.value_ptr returns a ctypes pointer; convert via ctypes.string_at -> numpy
-        proj_bytes = ctypes.string_at(glm.value_ptr(P), 16 * 4)
-        view_bytes = ctypes.string_at(glm.value_ptr(V), 16 * 4)
-        proj_arr = np.frombuffer(proj_bytes, dtype=np.float32).copy()
-        view_arr = np.frombuffer(view_bytes, dtype=np.float32).copy()
+        proj_arr = mat_to_column_major_floats(P)
+        view_arr = mat_to_column_major_floats(V)
+        proj_bytes = proj_arr.nbytes
         uboPV.update_subdata(0, proj_arr)
-        uboPV.update_subdata(16 * 4, view_arr)
+        uboPV.update_subdata(proj_bytes, view_arr)
 
-        #root.update(delta) # actualização do grafo de cena
+        root.update(delta) # actualização do grafo de cena
 
-        # Debug opcional do estado do carro (F1 para alternar)
-        if show_debug:
-            debug_accum += delta
-            if debug_accum >= 0.25:  # imprime a cada ~0.25s
-                debug_accum = 0.0
-                print(f"Car: x={car_state.x:.2f} z={car_state.z:.2f} yaw={math.degrees(car_state.yaw):.1f}° v={car_state.v:.2f} steer={math.degrees(car_state.steer):.1f}°")
+        # Normal render mode: enable back-face culling and filled polygons
+        glEnable(GL_CULL_FACE)
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
 
-        # Seleciona modo de camera
-        #if cam.mode == 'free':
-        #    update_free_camera(window, cam, delta)
-        #    cam_eye, cam_ctr = get_view_free(cam)
-        #else:
-        #    cam_eye, cam_ctr = follow_cam(delta)
-        
-        #definição das transformações até ao viewport (perspectivca e vista)
-
+        # definição das transformações até ao viewport (perspectiva e vista)
         glClearColor(0.05, 0.05, 0.25, 1.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
-        #shader.use()
-        #shader.set_common(V, P, light_dir)
-#
-        ## Desenhar objectos não texturados (carro)
-        #root.children[1].draw(shader, np.eye(4, dtype=np.float32), None, cam_eye, light_dir, ambient)
-#
-        ## Desenhar o piso com o shader texturado: ativar o programa e definir os uniforms comuns
-        #floor_shader.use()
-        #floor_shader.set_common(V, P, light_dir)
-        #root.children[0].draw(floor_shader, np.eye(4, dtype=np.float32), None, cam_eye, light_dir, ambient)
+   
+        # Draw the entire scene via the Renderer; it minimizes shader switches
+        # and calls node.on_draw when present.
+        def _common_setup(shader_obj, lights=None):
+            # upload per-shader globals: view/proj and lighting if API available
+            try:
+                if hasattr(shader_obj, 'set_common'):
+                    # pass collected point lights (if any) to shader wrapper
+                    shader_obj.set_common(V, P, light_dir, ambient, light_diffuse, lights)
+                else:
+                    # fallback: try to set uView/uProj uniforms directly
+                    prog = getattr(shader_obj, 'prog', None)
+                    if prog is not None:
+                        loc_p = glGetUniformLocation(prog, 'uProj')
+                        if loc_p != -1:
+                            glUniformMatrix4fv(loc_p, 1, GL_TRUE, P.astype(np.float32))
+                        loc_v = glGetUniformLocation(prog, 'uView')
+                        if loc_v != -1:
+                            glUniformMatrix4fv(loc_v, 1, GL_TRUE, V.astype(np.float32))
+                        # also try to set lighting uniforms for older shader wrappers
+                        loc_amb = glGetUniformLocation(prog, 'uAmbient')
+                        if loc_amb != -1:
+                            glUniform3fv(loc_amb, 1, ambient.astype(np.float32))
+                        loc_lcol = glGetUniformLocation(prog, 'uLightColor')
+                        if loc_lcol != -1:
+                            glUniform3fv(loc_lcol, 1, light_diffuse.astype(np.float32))
+                        # try to set point-light arrays if present
+                        loc_lcount = glGetUniformLocation(prog, 'uLightCount')
+                        if loc_lcount != -1 and lights is not None:
+                            count = min(len(lights), 4)
+                            glUniform1i(loc_lcount, count)
+                            # positions
+                            loc_pos0 = glGetUniformLocation(prog, 'uLightPos[0]')
+                            if loc_pos0 != -1 and count > 0:
+                                flat = []
+                                for i in range(count): flat.extend(list(lights[i]['pos']))
+                                glUniform3fv(loc_pos0, count, (np.array(flat, dtype=np.float32)))
+                            loc_col0 = glGetUniformLocation(prog, 'uLightCol[0]')
+                            if loc_col0 != -1 and count > 0:
+                                flatc = []
+                                for i in range(count): flatc.extend(list(np.array(lights[i]['col']) * lights[i]['int']))
+                                glUniform3fv(loc_col0, count, (np.array(flatc, dtype=np.float32)))
+            except Exception:
+                # let errors surface during development if desired
+                raise
 
-        skybox.draw(V, P)
+        draw_skybox_loader(sky, V, P)
+
+        renderer.render(root, None, cam_eye, light_dir, ambient, default_shader=shader, common_setup=_common_setup)
 
         window.swap_buffers()
 
@@ -317,20 +381,6 @@ def apply_transform_local_by_name(root, node_name, M, pre=True):
         raise RuntimeError(f"Node '{node_name}' não encontrado.")
     node.local = (M @ node.local) if pre else (node.local @ M)
     return node
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

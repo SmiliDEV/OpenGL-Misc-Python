@@ -2,17 +2,14 @@
 
 layout(location = 0) in vec3 aPos;
 
-layout (std140) uniform Matrices
-{
-    mat4 projection;
-    mat4 view;
-};
+uniform mat4 uProj;
+uniform mat4 uView;
 
 out vec3 TexCoords;
 
 void main()
 {
     TexCoords = aPos;
-    mat4 rotView = mat4(mat3(view));
-    gl_Position = projection * rotView * vec4(aPos, 1.0);
+    mat4 rotView = mat4(mat3(uView));
+    gl_Position = uProj * rotView * vec4(aPos, 1.0);
 }

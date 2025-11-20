@@ -34,8 +34,6 @@ class TextureCube:
                 print(f"  Loading face {i}: {face}")
                 image = Image.open(face)
                 print(f"    mode={image.mode} size={image.size}")
-                image = image.transpose(Image.FLIP_TOP_BOTTOM)
-                # convert to RGB unless image already has alpha and we want RGBA
                 if image.mode == 'RGBA':
                     img_data = image.convert('RGBA').tobytes()
                     gl_format = GL_RGBA
