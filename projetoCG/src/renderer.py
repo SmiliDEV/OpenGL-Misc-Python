@@ -73,14 +73,17 @@ class Renderer:
                         # no way to bind per-object uniforms from material
                         raise RuntimeError(f"Material for node '{node.name}' cannot bind uniforms")
             else:
-                # no material: try shader.set_per_object or node.on_draw
-                if shader is not None and hasattr(shader, 'set_per_object'):
-                    shader.set_per_object(world, node.albedo)
-                elif callable(getattr(node, 'on_draw', None)):
-                    # node.on_draw may perform custom uniform setup (shader is active)
+                # No material: prefer node.on_draw for custom per-object setup.
+                # Fail fast and instruct the caller to attach a Material to the
+                # mesh-owning node or implement `node.on_draw(...)` if custom
+                # per-object uniforms are required.
+                if callable(getattr(node, 'on_draw', None)):
                     node.on_draw(shader, node, world, vp, view_pos, light_dir, ambient)
                 else:
-                    raise RuntimeError(f"Node '{node.name}' has no material/on_draw and shader lacks 'set_per_object'")
+                    raise RuntimeError(
+                        f"Node '{node.name}' has no Material and no on_draw; attach a Material to this node "
+                        "or implement node.on_draw(shader, node, world, vp, view_pos, light_dir, ambient)."
+                    )
 
             # draw geometry
             node.mesh.draw()

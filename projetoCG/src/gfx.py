@@ -19,21 +19,21 @@ class ShaderProgram:
         glDeleteShader(fs)
         if not glGetProgramiv(self.prog, GL_LINK_STATUS):
             raise RuntimeError(glGetProgramInfoLog(self.prog).decode())
-        # Uniform locations aligned with shaders/basic.vert|frag
         self._u_model = glGetUniformLocation(self.prog, "uModel")
         self._u_view = glGetUniformLocation(self.prog, "uView")
         self._u_proj = glGetUniformLocation(self.prog, "uProj")
         self._u_lightdir = glGetUniformLocation(self.prog, "uLightDir")
-        self._u_color = glGetUniformLocation(self.prog, "uColor")
-        # optional lighting uniforms
+        self._u_albedo = glGetUniformLocation(self.prog, "uAlbedo")
         self._u_ambient = glGetUniformLocation(self.prog, "uAmbient")
-        self._u_lightcolor = glGetUniformLocation(self.prog, "uLightColor")
-        # point light arrays (support N lights via uniforms like uLightPos[0])
+        self._u_lightdiffuse = glGetUniformLocation(self.prog, "uLightDiffuse")
         self._u_lightcount = glGetUniformLocation(self.prog, "uLightCount")
-        # array base locations (use index 0 name to query)
         self._u_lightpos = glGetUniformLocation(self.prog, "uLightPos[0]")
         self._u_lightcol = glGetUniformLocation(self.prog, "uLightCol[0]")
         self._u_lightint = glGetUniformLocation(self.prog, "uLightInt[0]")
+        self._u_viewpos = glGetUniformLocation(self.prog, "uViewPos")
+        self._u_specular = glGetUniformLocation(self.prog, "uSpecularColor")
+        self._u_shininess = glGetUniformLocation(self.prog, "uShininess")
+        self._u_diffuse_factor = glGetUniformLocation(self.prog, "uDiffuseFactor")
 
     @classmethod
     def from_files(cls, vs_path: str, fs_path: str) -> "ShaderProgram":
@@ -54,16 +54,18 @@ class ShaderProgram:
     def use(self) -> None:
         glUseProgram(self.prog)
 
-    def set_common(self, v_mat: np.ndarray, p_mat: np.ndarray, light_dir, ambient=None, light_color=None, lights=None) -> None:
+    def set_common(self, v_mat: np.ndarray, p_mat: np.ndarray, light_dir, ambient=None, light_color=None, lights=None, view_pos=None) -> None:
         # Shaders expect separate uView and uProj; also simple directional light
         glUniformMatrix4fv(self._u_view, 1, GL_TRUE, v_mat)
         glUniformMatrix4fv(self._u_proj, 1, GL_TRUE, p_mat)
+        if self._u_viewpos != -1 and view_pos is not None:
+            glUniform3fv(self._u_viewpos, 1, np.array(view_pos, dtype=np.float32))
         if self._u_lightdir != -1 and light_dir is not None:
             glUniform3fv(self._u_lightdir, 1, np.array(light_dir, dtype=np.float32))
         if self._u_ambient != -1 and ambient is not None:
             glUniform3fv(self._u_ambient, 1, np.array(ambient, dtype=np.float32))
-        if self._u_lightcolor != -1 and light_color is not None:
-            glUniform3fv(self._u_lightcolor, 1, np.array(light_color, dtype=np.float32))
+        if self._u_lightdiffuse != -1 and light_color is not None:
+            glUniform3fv(self._u_lightdiffuse, 1, np.array(light_color, dtype=np.float32))
         # lights: list of dicts with keys 'pos','col','int'
         if lights is not None and len(lights) > 0:
             count = min(len(lights), 4)
@@ -87,9 +89,23 @@ class ShaderProgram:
             if self._u_lightcount != -1:
                 glUniform1i(self._u_lightcount, 0)
 
-    def set_per_object(self, model_mat: np.ndarray, albedo) -> None:
+    def set_per_object(self, model_mat: np.ndarray, albedo, specular=None, shininess=None, diffuse_factor=None) -> None:
+        """Set per-object uniforms (model, albedo, optional specular, shininess, diffuse_factor).
+
+        Backwards-compatible: callers may pass only (model, albedo).
+        """
         glUniformMatrix4fv(self._u_model, 1, GL_TRUE, model_mat)
-        glUniform3fv(self._u_color, 1, np.array(albedo, dtype=np.float32))
+        if self._u_albedo != -1:
+            glUniform3fv(self._u_albedo, 1, np.array(albedo, dtype=np.float32))
+        # specular
+        if specular is not None and self._u_specular != -1:
+            glUniform3fv(self._u_specular, 1, np.array(specular, dtype=np.float32))
+        # shininess
+        if shininess is not None and self._u_shininess != -1:
+            glUniform1f(self._u_shininess, float(shininess))
+        # diffuse factor
+        if diffuse_factor is not None and self._u_diffuse_factor != -1:
+            glUniform1f(self._u_diffuse_factor, float(diffuse_factor))
 
     def setBool(self, name: str, value: bool) -> None:
         glUniform1i(glGetUniformLocation(self.prog, name), int(value))

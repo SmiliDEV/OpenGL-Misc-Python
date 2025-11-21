@@ -80,3 +80,29 @@ def make_follow_camera(
         return eye, target
 
     return follow
+
+
+
+def make_sun_animator(
+    sun_node,
+    *,
+    translate,
+    rotate,
+    scale,
+    orbit_radius=15.0,
+    orbit_period=80.0,
+    tilt_angle_deg=23.5
+) -> Callable[[float], None]:
+    """Retorna animador que faz o sol orbitar em círculo inclinado."""
+    tilt_rad = math.radians(tilt_angle_deg)
+    tilt_rot = rotate(tilt_rad, (0, 0, 1))
+
+    def anim(node, dt: float):
+        time = glfw.get_time()
+        angle = (time / orbit_period) * 2.0 * math.pi
+        orbit_rot = rotate(angle, (0, 0, 1))
+        pos = orbit_rot @ tilt_rot @ np.array([orbit_radius, 1.0, 0.0, 1.0], dtype=np.float32)
+        m = translate(pos[0], pos[1], pos[2]) @ scale(2.0, 2.0, 2.0)
+        sun_node.local = m
+
+    return anim
