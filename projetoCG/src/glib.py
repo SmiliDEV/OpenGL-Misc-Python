@@ -210,10 +210,13 @@ class UniformBuffer:
 
     def bind_shader_block(self, program, block_name: str):
         block_index = glGetUniformBlockIndex(program, block_name)
+
         if block_index == GL_INVALID_INDEX:
             raise RuntimeError(f"Uniform block '{block_name}' not found in program {program}.")
+        
         if self.binding_point is None:
             raise RuntimeError("UniformBuffer must have a binding_point to bind to shader block.")
+        
         glUniformBlockBinding(program, block_index, self.binding_point)
 
     def delete(self):

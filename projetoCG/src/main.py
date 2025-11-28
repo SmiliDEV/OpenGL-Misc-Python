@@ -159,12 +159,14 @@ def main():
     shader = ShaderProgram.from_files(vs_path, fs_path)
     floor_shader = wrapperCreateShader('floor')
     floor_shader.setInt('texture1', 0)  # textura no slot 0
+    
     skybox_shader = Shader(get_content_of_file_project('shaders/skybox.vert'),
                            get_content_of_file_project('shaders/skybox.frag'))
 
     # bind UBO to binding point 0 for both shaders
     uboPV.bind_shader_block(skybox_shader.prog, 'Matrices')
-
+    uboPV.bind_shader_block(shader.prog, 'Matrices')
+    uboPV.bind_shader_block(floor_shader.prog, 'Matrices')
 
     # criar meshes 
     #chao 
@@ -241,7 +243,6 @@ def main():
     sun_node.material = Material.from_color(shader, (1.0, 0.95, 0.8))
     root.add(sun_node)
 
-
     # dados globais da cena, camara e luz
     up  = np.array([0.0, 1.0, 0.0], dtype=np.float32)
 
@@ -298,7 +299,6 @@ def main():
         # clear buffers
         glClearColor(0.05, 0.05, 0.25, 1.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-
    
         # Draw the entire scene via the Renderer; it minimizes shader switches
         # and calls node.on_draw when present.
@@ -312,12 +312,13 @@ def main():
                     # fallback: try to set uView/uProj uniforms directly
                     prog = getattr(shader_obj, 'prog', None)
                     if prog is not None:
-                        loc_p = glGetUniformLocation(prog, 'uProj')
-                        if loc_p != -1:
-                            glUniformMatrix4fv(loc_p, 1, GL_TRUE, P.astype(np.float32))
-                        loc_v = glGetUniformLocation(prog, 'uView')
-                        if loc_v != -1:
-                            glUniformMatrix4fv(loc_v, 1, GL_TRUE, V.astype(np.float32))
+                        # loc_p = glGetUniformLocation(prog, 'uProj')
+                        # if loc_p != -1:
+                        #     glUniformMatrix4fv(loc_p, 1, GL_TRUE, P.astype(np.float32))
+                        # loc_v = glGetUniformLocation(prog, 'uView')
+                        # if loc_v != -1:
+                        #     glUniformMatrix4fv(loc_v, 1, GL_TRUE, V.astype(np.float32))
+                        
                         # also try to set lighting uniforms for older shader wrappers
                         loc_amb = glGetUniformLocation(prog, 'uAmbient')
                         if loc_amb != -1:
@@ -354,11 +355,14 @@ def main():
         uboPV.update_subdata(proj_arr.nbytes, view_arr)    # view @ offset 64 (16 floats * 4 bytes)
         draw_skybox_loader(sky, view_rot, P)
 
-        root.update(deltaTime) # update the scene graph (animations, transforms, etc)
-        renderer.render(root, None, cam_eye, light_dir, ambient, default_shader=shader, common_setup=_common_setup)
+        proj_arr = mat_to_column_major_floats(P)
+        view_arr = mat_to_column_major_floats(V)
+        uboPV.update_subdata(0, proj_arr)                  # proj @ offset 0
+        uboPV.update_subdata(proj_arr.nbytes, view_arr)    # view @ offset 64 (16 floats * 4 bytes)
 
-        uboPV.update_subdata(0, proj_arr)
-        uboPV.update_subdata(proj_bytes, view_arr)
+        root.update(deltaTime) # update the scene graph (animations, transforms, etc)
+
+        renderer.render(root, None, cam_eye, light_dir, ambient, default_shader=shader, common_setup=_common_setup)
 
         window.swap_buffers()
 
