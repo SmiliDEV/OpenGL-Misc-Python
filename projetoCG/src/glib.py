@@ -27,7 +27,6 @@ class Shader:
             glDeleteShader(frag)
             raise RuntimeError(f"Shader link error:\n{info.decode() if isinstance(info, (bytes, bytearray)) else info}")
 
-        # shaders can be deleted after linking
         glDeleteShader(vert)
         glDeleteShader(frag)
 
@@ -61,7 +60,6 @@ class Shader:
             glDeleteProgram(self.prog)
             self.prog = 0
 
-    # uniform helpers (keeps API similar to existing code)
     def setInt(self, name: str, value: int):
         loc = glGetUniformLocation(self.prog, name)
         if loc != -1:
@@ -87,7 +85,6 @@ class Shader:
         if loc == -1:
             return
         m = np.asarray(mat, dtype=np.float32)
-        # expects column-major (OpenGL). If your matrices are row-major, transpose or set GL_TRUE.
         glUniformMatrix4fv(loc, 1, GL_FALSE, m)
 
 
@@ -210,6 +207,14 @@ class UniformBuffer:
         glBindBuffer(GL_UNIFORM_BUFFER, self.id)
         glBufferSubData(GL_UNIFORM_BUFFER, int(offset), arr.nbytes, arr)
         glBindBuffer(GL_UNIFORM_BUFFER, 0)
+
+    def bind_shader_block(self, program, block_name: str):
+        block_index = glGetUniformBlockIndex(program, block_name)
+        if block_index == GL_INVALID_INDEX:
+            raise RuntimeError(f"Uniform block '{block_name}' not found in program {program}.")
+        if self.binding_point is None:
+            raise RuntimeError("UniformBuffer must have a binding_point to bind to shader block.")
+        glUniformBlockBinding(program, block_index, self.binding_point)
 
     def delete(self):
         if self.id:

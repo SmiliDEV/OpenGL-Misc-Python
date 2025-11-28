@@ -41,14 +41,9 @@ class Skybox:
         tex = TextureCube(faces)
         return tex.id
 
-    def __init__(self):
-        self.cubemap_tex = self.load_cubemap(os.path.join(os.path.dirname(__file__), 'textures', 'skybox'))
-        
-        vs_src = get_content_of_file_project('shaders/skybox.vert')
-        fs_src = get_content_of_file_project('shaders/skybox.frag')
-        shader = Shader(vs_src, fs_src)
-        self.skybox_program = shader.prog
-
+    def __init__(self, shader_program: int):
+        self.cubemap_tex = self.load_cubemap(os.path.join(os.path.dirname(__file__), 'textures', 'skybox'))        
+        self.skybox_program = shader_program
         self.skybox_vertices = np.array([
             -1.0,  1.0, -1.0,
             -1.0, -1.0, -1.0,
@@ -211,13 +206,6 @@ def draw_skybox_loader(loader: 'Skybox', view: np.ndarray, projection: np.ndarra
     glDisable(GL_CULL_FACE)
 
     glUseProgram(prog)
-    loc_p = glGetUniformLocation(prog, 'uProj')
-    if loc_p != -1:
-        glUniformMatrix4fv(loc_p, 1, GL_TRUE, projection.astype(np.float32))
-    loc_v = glGetUniformLocation(prog, 'uView')
-    if loc_v != -1:
-        glUniformMatrix4fv(loc_v, 1, GL_TRUE, view_rot.astype(np.float32))
-
     glActiveTexture(GL_TEXTURE0)
     glBindTexture(GL_TEXTURE_CUBE_MAP, tex)
 
