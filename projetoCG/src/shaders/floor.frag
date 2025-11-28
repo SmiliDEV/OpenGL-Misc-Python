@@ -1,32 +1,33 @@
 #version 330 core
+out vec4 FragColor;
 
-in vec2 TexCoord;
-in vec3 FragPos;
-in vec3 Normal;
+in vec2 texCoord;
+
+in vec3 normal;
+in vec3 worldPos;
 
 uniform sampler2D uAlbedoSampler;
+
+uniform vec3 uLightDir;
 uniform vec3 uAmbient;
 uniform vec3 uLightDiffuse;
-uniform int uLightCount;
-uniform vec3 uLightPos[4];
-uniform vec3 uLightCol[4];
-uniform float uLightInt[4];
-uniform vec3 uLightDir;
 
-// optional uniforms set by Material or ShaderProgram
 uniform vec3 uSpecularColor;
 uniform float uShininess;
 uniform vec3 uViewPos;
 uniform float uDiffuseFactor;
 
-out vec4 FragColor;
+uniform int uLightCount;
+uniform vec3 uLightPos[4];
+uniform vec3 uLightCol[4];
+uniform float uLightInt[4];
 
 void main()
 {
-	vec3 albedo = texture(uAlbedoSampler, TexCoord * vec2(10.0)).rgb;
-	vec3 N = normalize(Normal);
+	vec3 albedo = texture(uAlbedoSampler, texCoord * vec2(10.0)).rgb;
+	vec3 N = normalize(normal);
 
-	vec3 V = normalize(uViewPos - FragPos);
+	vec3 V = normalize(uViewPos - worldPos);
 
 	vec3 Ld = normalize(-uLightDir);
 	float diff_dir = max(dot(N, Ld), 0.0);
@@ -39,7 +40,7 @@ void main()
 	vec3 diffuse_point = vec3(0.0);
 	vec3 spec_point = vec3(0.0);
 	for (int i = 0; i < uLightCount; ++i) {
-		vec3 L = normalize(uLightPos[i] - FragPos);
+		vec3 L = normalize(uLightPos[i] - worldPos);
 		float dif = max(dot(N, L), 0.0);
 		diffuse_point += uLightCol[i] * uLightInt[i] * dif;
 

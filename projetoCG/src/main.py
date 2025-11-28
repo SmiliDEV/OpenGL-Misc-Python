@@ -27,7 +27,7 @@ last_x, last_y = width / 2, height / 2
 first_mouse = True
 follow_cam = None
 
-def mouse_camera_callback(window, xpos, ypos):
+def cursor_pos_callback(window, xpos, ypos):
     global last_x, last_y, first_mouse, cam
     if first_mouse:
         last_x = xpos
@@ -47,9 +47,7 @@ def mouse_camera_callback(window, xpos, ypos):
         cam.pitch -= yoffset
         cam.pitch = max(math.radians(-85.0), min(math.radians(85.0), cam.pitch))
 
-
-# follow_cam will be created inside main() after the scene (and `car`) exist
-def on_key(win, key, sc, action, mods):
+def key_callback(win, key, sc, action, mods):
     global follow_cam, cam
     if action in (glfw.PRESS, glfw.REPEAT):
         if key == glfw.KEY_ESCAPE:
@@ -147,8 +145,8 @@ def build_scene(meshes: dict, materials: dict):
 
 def main():
     window = Window(800, 600, "Carro na rua — Grafo de cena com Flat Shading (OpenGL 3.3)")
-    window.mouse_router.register(mouse_camera_callback)
-    window.key_router.register(on_key)
+    glfw.set_cursor_pos_callback(window.win, cursor_pos_callback)
+    glfw.set_key_callback(window.win, key_callback)
     glfw.set_framebuffer_size_callback(window.win, framebuffer_size_callback)
     setup_gl_state()
 
@@ -292,11 +290,6 @@ def main():
         proj_arr = mat_to_column_major_floats(P)
         view_arr = mat_to_column_major_floats(V)
         proj_bytes = proj_arr.nbytes
-        uboPV.update_subdata(0, proj_arr)
-        uboPV.update_subdata(proj_bytes, view_arr)
-        
-
-        root.update(deltaTime) # update the scene graph (animations, transforms, etc)
 
         # Normal render mode: enable back-face culling and filled polygons
         glEnable(GL_CULL_FACE)
@@ -361,7 +354,11 @@ def main():
         uboPV.update_subdata(proj_arr.nbytes, view_arr)    # view @ offset 64 (16 floats * 4 bytes)
         draw_skybox_loader(sky, view_rot, P)
 
+        root.update(deltaTime) # update the scene graph (animations, transforms, etc)
         renderer.render(root, None, cam_eye, light_dir, ambient, default_shader=shader, common_setup=_common_setup)
+
+        uboPV.update_subdata(0, proj_arr)
+        uboPV.update_subdata(proj_bytes, view_arr)
 
         window.swap_buffers()
 

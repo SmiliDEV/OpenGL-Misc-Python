@@ -1,17 +1,18 @@
 #version 330 core
 out vec4 FragColor;
 
-in vec3 vNormal;
-in vec3 vWorldPos;
+in vec3 normal;
+in vec3 worldPos;
+
+uniform vec3 uAlbedo;
 
 uniform vec3 uLightDir; 
-uniform vec3 uAlbedo;    
 uniform vec3 uAmbient;   
 uniform vec3 uLightDiffuse; 
 
 uniform vec3 uSpecularColor;
 uniform float uShininess;    
-uniform vec3 uViewPos;       
+uniform vec3 uViewPos;
 uniform float uDiffuseFactor;
 
 uniform int uLightCount;
@@ -21,10 +22,10 @@ uniform float uLightInt[4];
 
 void main()
 {
-    vec3 N = normalize(vNormal);
+    vec3 N = normalize(normal);
 
     // view vector
-    vec3 V = normalize(uViewPos - vWorldPos);
+    vec3 V = normalize(uViewPos - worldPos);
 
     // directional light (sun)
     vec3 Ld = normalize(-uLightDir);
@@ -38,7 +39,7 @@ void main()
     vec3 point_contrib = vec3(0.0);
     vec3 point_spec = vec3(0.0);
     for (int i = 0; i < uLightCount; ++i) {
-        vec3 L = normalize(uLightPos[i] - vWorldPos);
+        vec3 L = normalize(uLightPos[i] - worldPos);
         float dif = max(dot(N, L), 0.0);
         point_contrib += uLightCol[i] * uLightInt[i] * dif;
         vec3 H = normalize(L + V);

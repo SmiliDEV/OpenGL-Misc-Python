@@ -1,6 +1,5 @@
 import numpy as np
 import os
-from glib import Shader
 
 class Node:
     def __init__(self, name="Node", local=None, mesh=None,animator=None,

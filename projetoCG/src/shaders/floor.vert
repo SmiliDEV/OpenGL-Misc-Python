@@ -8,15 +8,17 @@ uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProj;
 
-out vec2 TexCoord;
-out vec3 FragPos;
-out vec3 Normal;
+out vec2 texCoord;
+out vec3 worldPos;
+out vec3 normal;
 
 void main()
 {
-	vec4 worldPos = uModel * vec4(aPos, 1.0);
-	gl_Position = uProj * uView * worldPos;
-	TexCoord = aTexCoord;
-	Normal = mat3(uModel) * aNormal;
-	FragPos = worldPos.xyz;
+	vec4 _worldPos = uModel * vec4(aPos, 1.0);
+	worldPos = _worldPos.xyz;
+
+	texCoord = aTexCoord;
+	normal = mat3(uModel) * aNormal;
+
+	gl_Position = uProj * uView * _worldPos;
 }

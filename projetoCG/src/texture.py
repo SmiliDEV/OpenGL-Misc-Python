@@ -28,12 +28,9 @@ class TextureCube:
         self.id = glGenTextures(1)
         glBindTexture(GL_TEXTURE_CUBE_MAP, self.id)
 
-        print(f"TextureCube: creating cubemap id={self.id} with {len(faces)} faces")
         for i, face in enumerate(faces):
             try:
-                print(f"  Loading face {i}: {face}")
                 image = Image.open(face)
-                print(f"    mode={image.mode} size={image.size}")
                 if image.mode == 'RGBA':
                     img_data = image.convert('RGBA').tobytes()
                     gl_format = GL_RGBA
