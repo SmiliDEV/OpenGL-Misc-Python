@@ -33,13 +33,13 @@ class Car:
 
     # Geometria
     L: float = 2.6            # distância entre eixos
-    wheel_radius: float = 0.55
+    wheel_radius: float = 1.0
 
     # Visual
     wheel_spin: float = 0.0   # rad
 
     # Tuning
-    accel: float = 6.0
+    accel: float = 14.0
     drag: float = 1.5
     vmax: float = 20.0
     max_steer: float = math.radians(30.0)
@@ -56,10 +56,10 @@ class Car:
     def __post_init__(self):
         if not self.wheels:
             self.wheels = [
-                Wheel(name="Wheel_FL", ox=+1.2, oy=0.0, oz=-0.8, radius=self.wheel_radius, width=0.25, is_front=True),
-                Wheel(name="Wheel_FR", ox=+1.2, oy=0.0, oz=+0.8, radius=self.wheel_radius, width=0.25, is_front=True),
-                Wheel(name="Wheel_RL", ox=-1.4, oy=0.0, oz=-0.8, radius=self.wheel_radius, width=0.25, is_front=False),
-                Wheel(name="Wheel_RR", ox=-1.4, oy=0.0, oz=+0.8, radius=self.wheel_radius, width=0.25, is_front=False),
+                Wheel(name="Wheel_FL", ox=0.175, oy=-0.11, oz=0.35, radius=0.13, width=0.13, is_front=True),
+                Wheel(name="Wheel_FR", ox=-0.175, oy=-0.11, oz=0.35, radius=0.13, width=0.13, is_front=True),
+                Wheel(name="Wheel_RL", ox=0.175, oy=-0.10, oz=-0.30, radius=0.16, width=0.16, is_front=False),
+                Wheel(name="Wheel_RR", ox=-0.175, oy=-0.10, oz=-0.30, radius=0.16, width=0.16, is_front=False),
             ]
 
 

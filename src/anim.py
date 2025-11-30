@@ -27,6 +27,7 @@ def make_car_animators(
     def apply_transforms():
         m_car = translate(car_state.x, 0.0, car_state.z) @ rotate(-car_state.yaw, (0, 1, 0))
         car_node.local = m_car
+        
         for w in car_state.wheels:
             # Prefer exact-match by full name ('Wheel_FL') or short suffix ('FL').
             # If the node isn't present in the scene, skip updating that wheel
@@ -36,12 +37,16 @@ def make_car_animators(
                 # wheel node not present in the scene (user removed rear wheels, etc.)
                 continue
 
-            r_steer = rotate(car_state.steer if w.is_front else 0.0, (0, 1, 0))
+            r_steer = rotate(car_state.steer if w.is_front else 0.0, (0, -1, 0))
             r_x = rotate(math.pi / 2.0, (1, 0, 0))
-            r_spin = rotate(w.spin, (0, -1, 0))
+            r_spin = rotate(w.spin, (1, 0, 0))
+
+            # apply per-wheel scale so visual size matches wheel.radius and wheel.width
+            # order: translate -> steer -> rotate X to wheel frame -> spin -> scale
             m = (
                 translate(w.ox, w.oy, w.oz) @ r_steer @ r_x @ r_spin @ scale(w.radius, w.radius, w.width)
             )
+            
             node.local = m
 
     def anim(node, dt: float):

@@ -117,34 +117,38 @@ def build_scene(meshes: dict, materials: dict):
         car_body.material = materials['car']
 
     car_node.add(car_body)
-    root.add(floor_node, car_node)
 
     # Wheels
     wheels = {}
     if (wheel_left is not None) or (wheel_right is not None) or (wheel_rear is not None) or (wheel_single is not None):
-        wheel_radius = 0.55
-        wheel_width = 0.30
-        x_off, z_off, y_off = 2.3, 1.2, wheel_radius
-
-        def make_wheel(name, ox, oy, oz):
+        
+        def make_wheel(name):
             # Front wheels (FL / FR) use wheel_left/wheel_right when available.
             # Rear wheels (RL / RR) use wheel_rear (cylinder) or fallback to wheel_single.
             if name.endswith('FL'):
                 mesh_for_wheel = wheel_left if wheel_left is not None else (wheel_rear or wheel_single)
             elif name.endswith('FR'):
                 mesh_for_wheel = wheel_right if wheel_right is not None else (wheel_rear or wheel_single)
+            elif name.endswith('RL'):
+                mesh_for_wheel = wheel_left if wheel_left is not None else (wheel_rear or wheel_single)
+            elif name.endswith('RR'):
+                mesh_for_wheel = wheel_right if wheel_right is not None else (wheel_rear or wheel_single)
             else:
                 mesh_for_wheel = wheel_rear if wheel_rear is not None else wheel_single
+            
             # create wheel node with no initial transform — animator will set per-frame transforms
             n = Node(name, mesh=mesh_for_wheel)
+            
             if 'wheel' in materials:
                 n.material = materials['wheel']
             return n
 
-        # only create front wheel nodes; rear wheels removed per request
+        # create all four wheel nodes
         wheels = {
-            'Wheel_FL': make_wheel('Wheel_FL', +x_off, y_off, -z_off),
-            'Wheel_FR': make_wheel('Wheel_FR', +x_off, y_y := y_off, +z_off),
+            'Wheel_FL': make_wheel('Wheel_FL'),
+            'Wheel_FR': make_wheel('Wheel_FR'),
+            'Wheel_RL': make_wheel('Wheel_RL'),
+            'Wheel_RR': make_wheel('Wheel_RR'),
         }
         # attach wheels to the car body so they inherit car_body transforms (scale/rotation)
         car_body.add(*wheels.values())
@@ -156,6 +160,8 @@ def build_scene(meshes: dict, materials: dict):
         'floor': floor_node,
         'wheels': wheels,    
     }
+
+    root.add(floor_node, car_node)
 
     return root, nodes
 
