@@ -3,7 +3,7 @@ from typing import List, Tuple, Optional, Dict
 
 import numpy as np
 
-from gfx import Mesh, MeshTextured
+from glib import Mesh, MeshTextured
 
 
 def _fix_index(i: int, arr_len: int) -> int:

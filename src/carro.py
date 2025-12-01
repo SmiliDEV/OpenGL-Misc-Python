@@ -129,8 +129,10 @@ def step_pose(car: Car, dt: float) -> None:
 def step_wheels(car: Car, dt: float) -> None:
     """Atualiza giro visual das rodas."""
     dt = min(dt,0.05)  # evitar saltos grandes
+    
     if car.wheel_radius > 0.0:
         car.wheel_spin += (car.v / car.wheel_radius) * dt
+
     for w in car.wheels:
         if w.radius > 0.0:
             w.spin += (car.v / w.radius) * dt

@@ -1,17 +1,21 @@
 import glfw
 import sys
-from event import MouseCallbackRouter, KeyCallbackRouter
 
 class Window:
     def __init__(self, width: int, height: int, title: str):
         if not glfw.init():
             print("Failed to initialize GLFW", file=sys.stderr); sys.exit(1)
+        
         glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+        
         self.win = glfw.create_window(width, height, title, None, None)
+        glfw.set_input_mode(self.win, glfw.CURSOR, glfw.CURSOR_DISABLED)
+        
         if not self.win:
             glfw.terminate(); print("Failed to create window", file=sys.stderr); sys.exit(1)
+        
         glfw.make_context_current(self.win)
 
         # Usar vsync para evitar o loop a correr demasiado depressa saturando a CPU

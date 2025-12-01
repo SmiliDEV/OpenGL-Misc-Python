@@ -1,19 +1,15 @@
-# OpenGL com Shaders (>3.3)
-
-import sys, math, ctypes, os
+import math, os
 import numpy as np
 import glfw
 from OpenGL.GL import *
-import anim  # módulo separado com animadores (src/anim.py)
-from carro import Car  # estado físico do carro
+import anim
+from carro import Car
 from camera import Camera, update_free_camera, get_view_free
 from node import Node
-from gfx import MeshTextured, ShaderProgram, Mesh, wrapperCreateShader
 from math3d import *
 from geo import *
 from skybox import Skybox, draw_skybox_loader
 from renderer import Renderer
-from texture import *
 from window import Window
 from glib import *
 from material import Material
@@ -27,6 +23,7 @@ cam = Camera()
 last_x, last_y = width / 2, height / 2
 first_mouse = True
 follow_cam = None
+follow_cam2 = None
 
 def cursor_pos_callback(window, xpos, ypos):
     global last_x, last_y, first_mouse, cam
@@ -40,38 +37,48 @@ def cursor_pos_callback(window, xpos, ypos):
     last_x = xpos
     last_y = ypos
 
-    # only apply mouse-look when the free camera is actively looking (RMB held)
-    if getattr(cam, '_looking', False):
-        xoffset *= cam.mouse_sens
-        yoffset *= cam.mouse_sens
-        cam.yaw += xoffset
-        cam.pitch -= yoffset
-        cam.pitch = max(math.radians(-85.0), min(math.radians(85.0), cam.pitch))
+    xoffset *= cam.mouse_sens
+    yoffset *= cam.mouse_sens
+    cam.yaw += xoffset
+    cam.pitch += yoffset
+    cam.pitch = max(math.radians(-85.0), min(math.radians(85.0), cam.pitch))
 
 def key_callback(win, key, sc, action, mods):
     global follow_cam, cam
     if action in (glfw.PRESS, glfw.REPEAT):
         if key == glfw.KEY_ESCAPE:
             glfw.set_window_should_close(win, True)
-        elif key == glfw.KEY_P and action == glfw.PRESS:
-            # Toggle camera mode. If switching to free, re-seed free cam from current follow view
-            new_mode = 'free' if cam.mode != 'free' else 'follow'
-            if new_mode == 'free' and follow_cam is not None:
-                # Sample the current follow camera position and orient the free cam to match
-                eye, ctr = follow_cam(0.0)
-                dirv = ctr - eye
-                n = np.linalg.norm(dirv)
-                if n > 1e-6:
-                    dirv = dirv / n
-                # yaw = atan2(z, x), pitch = asin(y)
-                yaw = math.atan2(dirv[2], dirv[0])
-                yclamped = max(-1.0, min(1.0, float(dirv[1])))
-                pitch = math.asin(yclamped)
-                cam.pos = eye.astype(np.float32)
-                cam.yaw = yaw
-                cam.pitch = pitch
-                cam._looking = False
-                cam._last_mouse = None
+        elif key == glfw.KEY_SPACE and action == glfw.PRESS:
+            # Cycle camera modes: free -> follow -> orbit -> free
+            global follow_cam2
+            modes = ['free', 'follow', 'orbit']
+            idx = modes.index(cam.mode) if cam.mode in modes else 0
+            new_mode = modes[(idx + 1) % len(modes)]
+
+            # If switching to free, seed the free camera from the previous mode's view
+            if new_mode == 'free':
+                eye, ctr = None, None
+                if cam.mode == 'follow' and follow_cam is not None:
+                    eye, ctr = follow_cam(0.0)
+                elif cam.mode == 'orbit' and follow_cam2 is not None:
+                    eye, ctr = follow_cam2(0.0)
+                # fall back to follow_cam for initialization if no other source
+                if eye is None and follow_cam is not None:
+                    eye, ctr = follow_cam(0.0)
+                if eye is not None and ctr is not None:
+                    dirv = ctr - eye
+                    n = np.linalg.norm(dirv)
+                    if n > 1e-6:
+                        dirv = dirv / n
+                    # yaw = atan2(z, x), pitch = asin(y)
+                    yaw = math.atan2(dirv[2], dirv[0])
+                    yclamped = max(-1.0, min(1.0, float(dirv[1])))
+                    pitch = math.asin(yclamped)
+                    cam.pos = eye.astype(np.float32)
+                    cam.yaw = yaw
+                    cam.pitch = pitch
+                    cam._looking = False
+                    cam._last_mouse = None
             cam.mode = new_mode
 
 def framebuffer_size_callback(window, width, height):
@@ -116,7 +123,45 @@ def build_scene(meshes: dict, materials: dict):
     if 'car' in materials:
         car_body.material = materials['car']
 
-    car_node.add(car_body)
+    # optional left/right door meshes: attach as children of car_body so they inherit body transforms
+    door_left = meshes.get('door_left', None)
+    door_right = meshes.get('door_right', None)
+
+    if door_left is not None:
+        # left door transform: slightly offset and scaled to fit the normalized OBJ
+        door_node_l = Node('Door_L', local=translate(-0.17, -0.06, -0.0375) @ scale(0.3, 0.3, 0.3), mesh=door_left)
+        if 'door_left' in materials:
+            door_node_l.material = materials['door_left']
+        elif 'door' in materials:
+            door_node_l.material = materials['door']
+        elif 'car' in materials:
+            door_node_l.material = materials['car']
+        car_body.add(door_node_l)
+
+    if door_right is not None:
+        # right door uses mirrored Z position
+        door_node_r = Node('Door_R', local=translate(0.17, -0.07, 0.0375) @ scale(0.3, 0.3, 0.3), mesh=door_right)
+        if 'door_right' in materials:
+            door_node_r.material = materials['door_right']
+        elif 'door' in materials:
+            door_node_r.material = materials['door']
+        elif 'car' in materials:
+            door_node_r.material = materials['car']
+        car_body.add(door_node_r)
+
+    # Optional steering wheel (volante) placed inside the car body for visual steering
+    steering_mesh = meshes.get('steering_wheel', None)
+    if steering_mesh is not None:
+        # local placement: a small transform inside the car cockpit. These values may
+        # be tuned if the model appears misplaced; it's placed with a modest scale
+        # so it fits inside the scaled car_body.
+        sw_node = Node('SteeringWheel', local=translate(0.1, -0.01, 0.07) @ rotate(0.0, (1,0,0)) @ scale(0.10, 0.10, 0.10), mesh=steering_mesh)
+        # reuse wheel material if available otherwise fallback to car material
+        if 'wheel' in materials:
+            sw_node.material = materials['wheel']
+        elif 'car' in materials:
+            sw_node.material = materials['car']
+        car_body.add(sw_node)
 
     # Wheels
     wheels = {}
@@ -150,15 +195,18 @@ def build_scene(meshes: dict, materials: dict):
             'Wheel_RL': make_wheel('Wheel_RL'),
             'Wheel_RR': make_wheel('Wheel_RR'),
         }
+        
         # attach wheels to the car body so they inherit car_body transforms (scale/rotation)
         car_body.add(*wheels.values())
+
+    car_node.add(car_body)
 
     nodes = {
         'root': root,
         'car': car_node,
         'car_body': car_body,
         'floor': floor_node,
-        'wheels': wheels,    
+        'wheels': wheels,
     }
 
     root.add(floor_node, car_node)
@@ -229,6 +277,29 @@ def main():
         wheel_mesh_left = wheel_cyl_mesh
     if wheel_mesh_right is None:
         wheel_mesh_right = wheel_cyl_mesh
+    # try to load door models (optional) — left/right
+    doorl_mesh = None
+    doorl_path = os.path.join(os.path.dirname(__file__), 'objects', 'de.obj')
+    doord_path = os.path.join(os.path.dirname(__file__), 'objects', 'dd.obj')
+    try:
+        doorl_mesh = load_obj(doorl_path, normalize=True, target_max=1.0)
+    except Exception:
+        doorl_mesh = None
+
+    doord_mesh = None
+    try:
+        doord_mesh = load_obj(doord_path, normalize=True, target_max=1.0)
+    except Exception:
+        doord_mesh = None
+
+    # Steering wheel (volante) — optional model placed inside objects/wheel.obj
+    steering_mesh = None
+    steering_path = os.path.join(os.path.dirname(__file__), 'objects', 'wheel.obj')
+    try:
+        steering_mesh = load_obj(steering_path, normalize=True, target_max=1.0)
+    except Exception:
+        steering_mesh = None
+    
     # small sphere mesh for visualizing lights
     inter_s, idx_s = gen_uv_sphere_flat(radius=1.0, stacks=12, slices=24)
     sphere_mesh = Mesh(inter_s, idx_s)
@@ -236,12 +307,22 @@ def main():
     mesh_dict = {
         'car': car_mesh,
         'plane': plane_mesh,
+        'door_left': doorl_mesh,
+        'door_right': doord_mesh,
         'wheel_left': wheel_mesh_left,
         'wheel_right': wheel_mesh_right,
-        # rear wheels always use the cylinder
         'wheel_rear': wheel_cyl_mesh,
+        'steering_wheel': steering_mesh,
     }
     resources = [car_mesh, plane_mesh, wheel_mesh_left, wheel_mesh_right, wheel_cyl_mesh, sphere_mesh]
+    if steering_mesh is not None:
+        resources.append(steering_mesh)
+    # add loaded door meshes to resources (keeping insertion order)
+    if doorl_mesh is not None:
+        resources.insert(2, doorl_mesh)
+    if doord_mesh is not None:
+        resources.insert(3, doord_mesh)
+    
     COL_CAR = (0.8,0.1,0.1)
     COL_WHEEL = (0.1,0.1,0.1)
     materials = {
@@ -251,6 +332,7 @@ def main():
     # there is always a wheel mesh available (at least the procedural cylinder)
     materials['wheel'] = Material.from_color(shader, COL_WHEEL)
 
+    # door offset is local-space translation applied to the Door node (small values, car_body also scales)
     root, nodes = build_scene(meshes=mesh_dict, materials=materials)
 
     # locate the Car node and wheel nodes returned by builder
@@ -281,6 +363,39 @@ def main():
         translate=translate, rotate=rotate, scale=scale,
     )
 
+    # Door animators: open while key is held (K = left, L = right)
+    def make_door_anim(node, win, key, open_angle_deg=70.0, axis=(0,1,0), speed=8.0):
+        if node is None:
+            return None
+        gw = getattr(win, 'win', win)
+        # capture base translation and scale from initial local
+        base = node.local.copy()
+        t = base[:3, 3].copy()
+        S = base[:3, :3]
+        sx, sy, sz = np.linalg.norm(S, axis=0).tolist()
+        current = 0.0
+        target_open = math.radians(open_angle_deg)
+
+        def anim_fn(n, dt: float):
+            nonlocal current
+            pressed = glfw.get_key(gw, key) in (glfw.PRESS, glfw.REPEAT)
+            target = target_open if pressed else 0.0
+            alpha = 1.0 - math.exp(-speed * dt) if dt > 0 else 1.0
+            current += (target - current) * alpha
+            # rebuild local: translate -> rotate -> scale
+            n.local = translate(float(t[0]), float(t[1]), float(t[2])) @ rotate(current, axis) @ scale(float(sx), float(sy), float(sz))
+
+        return anim_fn
+
+    # lookup door nodes and attach animators
+    door_l_node = root.find('Door_L')
+    door_r_node = root.find('Door_R')
+    if door_l_node is not None:
+        door_l_node.animator = make_door_anim(door_l_node, window, glfw.KEY_K, open_angle_deg=75.0, axis=(0,1,0), speed=10.0)
+    if door_r_node is not None:
+        # right door opens the opposite direction
+        door_r_node.animator = make_door_anim(door_r_node, window, glfw.KEY_L, open_angle_deg=-75.0, axis=(0,1,0), speed=10.0)
+
     # Camera a seguir o carro (offset atrás e acima, com smoothing)
     # Camera atrás do carro (e um pouco acima). Para frente = +X, usar offset X negativo.
     global follow_cam
@@ -290,7 +405,15 @@ def main():
         look_ahead=8.0,
         lag_seconds=0.18,
     )
-    
+
+    # Orbital camera that circles the car — user can tweak with keys
+    global follow_cam2
+    follow_cam2 = anim.make_follow_camera_2(
+        lambda: car_node.local.copy(),
+        offset_local=(-1.1, 3.0, -0.75),
+        look_ahead=8.0,
+    )
+
     # create a Sun node (visualized by a small sphere) and mark it as a light source
     sun_node = Node('Sun', local=translate(0.0, 9.0, 2.0) @ scale(0.6, 0.6, 0.6), mesh=sphere_mesh)
     sun_node.is_light = True
@@ -337,7 +460,12 @@ def main():
         if cam.mode == 'free':
             update_free_camera(window, cam, deltaTime)
             cam_eye, cam_ctr = get_view_free(cam)
+        elif cam.mode == 'follow':
+            cam_eye, cam_ctr = follow_cam(deltaTime)
+        elif cam.mode == 'orbit':
+            cam_eye, cam_ctr = follow_cam2(deltaTime)
         else:
+            # fallback to follow behavior
             cam_eye, cam_ctr = follow_cam(deltaTime)
 
         # create projection and view matrices

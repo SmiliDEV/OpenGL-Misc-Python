@@ -7,7 +7,6 @@ from file import get_content_of_file_project
 
 import ctypes
 from node import Node
-from texture import TextureCube
 import glob
 
 
