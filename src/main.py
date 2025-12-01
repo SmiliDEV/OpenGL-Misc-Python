@@ -335,6 +335,38 @@ def main():
     # door offset is local-space translation applied to the Door node (small values, car_body also scales)
     root, nodes = build_scene(meshes=mesh_dict, materials=materials)
 
+    # --- Importar objetos go.obj e gd.obj e criar hierarquia ---
+    # carregar meshes adicionais e criar nodes: GD será filho de GO
+    go_mesh = None
+    gd_mesh = None
+    go_path = os.path.join(os.path.dirname(__file__), 'objects', 'go.obj')
+    gd_path = os.path.join(os.path.dirname(__file__), 'objects', 'gd.obj')
+    try:
+        go_mesh = load_obj(go_path, normalize=True, target_max=1.0)
+    except Exception:
+        go_mesh = None
+    try:
+        gd_mesh = load_obj(gd_path, normalize=True, target_max=1.0)
+    except Exception:
+        gd_mesh = None
+
+    # criar nodes mesmo que um dos meshes falhe (não colocar exceção aqui)
+    if go_mesh is not None:
+        # posicione o objeto um pouco à direita para evitar sobreposição com o carro
+        go_node = Node('GO', local=translate(0.0, 2.3, 0.0) @ scale(10.0, 10.0, 10.0) @ rotate(math.radians(90), (0, 1, 0)), mesh=go_mesh)
+        # material neutro para visualização
+        go_node.material = Material.from_color(shader, (0.6, 0.6, 0.6))
+        # se também houver gd_mesh, cria um node e adiciona como filho
+        if gd_mesh is not None:
+            gd_node = Node('GD', local=translate(0, 0.0, 0.475) @ scale(0.7, 0.7, 0.7), mesh=gd_mesh)
+            gd_node.material = Material.from_color(shader, (0.7, 0.7, 0.7))
+            go_node.add(gd_node)
+            # garantir que seja destruído no cleanup
+            resources.append(gd_mesh)
+        # adicionar GO (com GD como filho, se presente) à raiz da cena
+        root.add(go_node)
+        resources.append(go_mesh)
+
     # locate the Car node and wheel nodes returned by builder
     car_node = nodes.get('car')
     if car_node is None:
@@ -363,38 +395,19 @@ def main():
         translate=translate, rotate=rotate, scale=scale,
     )
 
-    # Door animators: open while key is held (K = left, L = right)
-    def make_door_anim(node, win, key, open_angle_deg=70.0, axis=(0,1,0), speed=8.0):
-        if node is None:
-            return None
-        gw = getattr(win, 'win', win)
-        # capture base translation and scale from initial local
-        base = node.local.copy()
-        t = base[:3, 3].copy()
-        S = base[:3, :3]
-        sx, sy, sz = np.linalg.norm(S, axis=0).tolist()
-        current = 0.0
-        target_open = math.radians(open_angle_deg)
-
-        def anim_fn(n, dt: float):
-            nonlocal current
-            pressed = glfw.get_key(gw, key) in (glfw.PRESS, glfw.REPEAT)
-            target = target_open if pressed else 0.0
-            alpha = 1.0 - math.exp(-speed * dt) if dt > 0 else 1.0
-            current += (target - current) * alpha
-            # rebuild local: translate -> rotate -> scale
-            n.local = translate(float(t[0]), float(t[1]), float(t[2])) @ rotate(current, axis) @ scale(float(sx), float(sy), float(sz))
-
-        return anim_fn
-
     # lookup door nodes and attach animators
     door_l_node = root.find('Door_L')
     door_r_node = root.find('Door_R')
     if door_l_node is not None:
-        door_l_node.animator = make_door_anim(door_l_node, window, glfw.KEY_K, open_angle_deg=75.0, axis=(0,1,0), speed=10.0)
+        door_l_node.animator = anim.make_door_anim(door_l_node, window, glfw.KEY_K, open_angle_deg=75.0, axis=(0,1,0), speed=10.0)
     if door_r_node is not None:
-        # right door opens the opposite direction
-        door_r_node.animator = make_door_anim(door_r_node, window, glfw.KEY_L, open_angle_deg=-75.0, axis=(0,1,0), speed=10.0)
+        door_r_node.animator = anim.make_door_anim(door_r_node, window, glfw.KEY_L, open_angle_deg=-75.0, axis=(0,1,0), speed=10.0)
+
+    # Attach animator for garage door (GD) - toggle open/close with 'F'
+    gd_node = root.find('GD')
+    if gd_node is not None:
+        # open_offset_y controls how far the door moves along Y when opened (negative slides down)
+        gd_node.animator = anim.make_garage_door_animator(gd_node, win=window, key=glfw.KEY_F, open_offset_y=-0.4, speed=8.0)
 
     # Camera a seguir o carro (offset atrás e acima, com smoothing)
     # Camera atrás do carro (e um pouco acima). Para frente = +X, usar offset X negativo.
@@ -570,10 +583,6 @@ def apply_transform_local_by_name(root, node_name, M, pre=True):
         raise RuntimeError(f"Node '{node_name}' não encontrado.")
     node.local = (M @ node.local) if pre else (node.local @ M)
     return node
-
-
-
-
 
 if __name__ == "__main__":
     main()

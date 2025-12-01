@@ -10,6 +10,8 @@ from typing import Dict, Callable
 import glfw  # para ler inputs de teclado na janela
 import numpy as np
 
+from math3d import translate, rotate, scale
+
 from carro import Car, update_car
 
 # Helpers esperados serão injectados (translate, rotate, scale). Mantemos aqui só nomes.
@@ -161,3 +163,89 @@ def make_sun_animator(
         sun_node.local = m
 
     return anim
+
+
+def make_garage_door_animator(
+    node,
+    *,
+    win,
+    key=glfw.KEY_F,
+    open_offset_y: float = -1.5,
+    speed: float = 6.0,
+):
+    """Return an animator that toggles a vertical (Y) translation of `node` when `key` is pressed.
+
+    Behavior:
+    - The animator stores the node's base local matrix and applies an additional Y translation
+      when the door is 'open'. Pressing the key toggles open/closed (rising-edge detection).
+    - Movement is smoothed; `speed` controls responsiveness (higher is snappier).
+
+    Parameters:
+    - node: Node instance to animate
+    - win: window or glfw window pointer (used to read keyboard state)
+    - key: GLFW key to toggle with (default F)
+    - open_offset_y: Y translation amount applied when opened (negative slides down by default)
+    - speed: smoothing speed in units/sec
+    """
+
+    gw = getattr(win, 'win', win)
+
+    # Capture base transform and compute base translation
+    base_local = node.local.copy()
+    base_t = base_local[:3, 3].copy()
+
+    # State variables in closure
+    is_open = False
+    prev_key = False
+    current_y = float(base_t[1])
+
+    def anim(n, dt: float):
+        nonlocal is_open, prev_key, current_y, base_local
+
+        # Read current key state
+        cur_pressed = glfw.get_key(gw, key) in (glfw.PRESS, glfw.REPEAT)
+
+        # detect rising edge: key pressed now, but not in previous frame
+        if cur_pressed and not prev_key:
+            is_open = not is_open
+
+        prev_key = cur_pressed
+
+        target_y = float(base_t[1] + (open_offset_y if is_open else 0.0))
+
+        # smooth towards target
+        if dt > 0:
+            alpha = 1.0 - pow(2.718281828, -speed * dt)
+        else:
+            alpha = 1.0
+
+        current_y += (target_y - current_y) * alpha
+
+        # rebuild node.local with updated Y offset while preserving rotation/scale
+        M = base_local.copy()
+        M[:3, 3] = np.array([float(base_t[0]), -current_y, float(base_t[2])], dtype=np.float32)
+        n.local = M
+
+    return anim
+
+def make_door_anim(node, win, key, open_angle_deg=70.0, axis=(0,1,0), speed=8.0):
+    if node is None:
+        return None
+    gw = getattr(win, 'win', win)
+    # capture base translation and scale from initial local
+    base = node.local.copy()
+    t = base[:3, 3].copy()
+    S = base[:3, :3]
+    sx, sy, sz = np.linalg.norm(S, axis=0).tolist()
+    current = 0.0
+    target_open = math.radians(open_angle_deg)
+
+    def anim_fn(n, dt: float):
+        nonlocal current
+        pressed = glfw.get_key(gw, key) in (glfw.PRESS, glfw.REPEAT)
+        target = target_open if pressed else 0.0
+        alpha = 1.0 - math.exp(-speed * dt) if dt > 0 else 1.0
+        current += (target - current) * alpha
+        n.local = translate(float(t[0]), float(t[1]), float(t[2])) @ rotate(current, axis) @ scale(float(sx), float(sy), float(sz))
+
+    return anim_fn
