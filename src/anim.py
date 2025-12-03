@@ -7,7 +7,7 @@ Este módulo NÃO conhece OpenGL diretamente; só transforma o estado
 import math
 from typing import Dict, Callable
 
-import glfw  # para ler inputs de teclado na janela
+import glfw 
 import numpy as np
 
 from math3d import translate, rotate, scale
@@ -43,7 +43,7 @@ def make_car_animators(
             r_x = rotate(math.pi / 2.0, (1, 0, 0))
             # make rear wheels rotate visually a bit faster than front wheels
             rear_spin_multiplier = 1.5
-            spin_val = w.spin * (rear_spin_multiplier if not w.is_front else 1.0)
+            spin_val = w.spin * (rear_spin_multiplier if not w.is_front else 1.0) * 0.2  # pra nao rodar tao rapido
             r_spin = rotate(spin_val, (1, 0, 0))
 
             # apply per-wheel scale so visual size matches wheel.radius and wheel.width
@@ -64,7 +64,7 @@ def make_car_animators(
                 S = base[:3, :3]
                 sx, sy, sz = np.linalg.norm(S, axis=0).tolist()
                 # steering wheel typically rotates more than wheel steer angle
-                STEER_WHEEL_RATIO = 8.0
+                STEER_WHEEL_RATIO = 6.0
                 angle = -car_state.steer * STEER_WHEEL_RATIO
                 # rotation axis aligned with forward vector of car (+X)
                 r_sw = rotate(angle, (0, 0, -1))
@@ -146,9 +146,9 @@ def make_sun_animator(
     translate,
     rotate,
     scale,
-    orbit_radius=15.0,
+    orbit_radius=100.0,
     orbit_period=80.0,
-    tilt_angle_deg=23.5
+    tilt_angle_deg=0.0,
 ) -> Callable[[float], None]:
     """Retorna animador que faz o sol orbitar em círculo inclinado."""
     tilt_rad = math.radians(tilt_angle_deg)
@@ -157,8 +157,8 @@ def make_sun_animator(
     def anim(node, dt: float):
         time = glfw.get_time()
         angle = (time / orbit_period) * 2.0 * math.pi
-        orbit_rot = rotate(angle, (0, 0, 1))
-        pos = orbit_rot @ tilt_rot @ np.array([orbit_radius, 1.0, 0.0, 1.0], dtype=np.float32)
+        orbit_rot = rotate(angle, (0, 1, 0))
+        pos = orbit_rot @ tilt_rot @ np.array([orbit_radius, 0.0, 1.0, 0.0], dtype=np.float32)
         m = translate(pos[0], pos[1], pos[2]) @ scale(2.0, 2.0, 2.0)
         sun_node.local = m
 

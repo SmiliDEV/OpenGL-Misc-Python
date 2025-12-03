@@ -27,7 +27,6 @@ class Renderer:
             elif hasattr(shader, 'prog'):
                 glUseProgram(shader.prog)
             else:
-                # best-effort: try to call glUseProgram if `shader` is an int
                 try:
                     glUseProgram(int(shader))
                 except Exception:
@@ -48,7 +47,7 @@ class Renderer:
         if mat is not None and getattr(mat, 'shader', None) is not None:
             shader = mat.shader
         else:
-            shader = node.shader if getattr(node, 'shader', None) is not None else default_shader
+            shader = default_shader
 
         # ensure shader is active and common per-shader uniforms are set
         self._use_shader(shader, common_setup, lights)

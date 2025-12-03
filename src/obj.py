@@ -138,4 +138,7 @@ def load_obj(path: str, scale: float = 1.0, normalize: bool = False, target_max:
         return Mesh(inter6, i_arr)
 
 
+
+
+
 __all__ = ['load_obj']

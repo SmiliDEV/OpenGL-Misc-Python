@@ -25,7 +25,6 @@ class Node:
         return self
 
     def update(self, dt):
-        # run per-node animator (CPU-side only)
         if self.animator:
             self.animator(self, dt)
         for c in self.children: c.update(dt)

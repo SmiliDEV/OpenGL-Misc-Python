@@ -19,7 +19,8 @@ from obj import *
 width = 800
 height = 600
 
-cam = Camera()
+# Ajustar posição inicial da câmara (Free Cam) para perto do carro (-15, 0, 0)
+cam = Camera(pos=np.array([-28.0, 5.0, 0.0], dtype=np.float32), yaw=0.0)
 last_x, last_y = width / 2, height / 2
 first_mouse = True
 follow_cam = None
@@ -70,7 +71,6 @@ def key_callback(win, key, sc, action, mods):
                     n = np.linalg.norm(dirv)
                     if n > 1e-6:
                         dirv = dirv / n
-                    # yaw = atan2(z, x), pitch = asin(y)
                     yaw = math.atan2(dirv[2], dirv[0])
                     yclamped = max(-1.0, min(1.0, float(dirv[1])))
                     pitch = math.asin(yclamped)
@@ -90,11 +90,12 @@ def setup_gl_state():
     glCullFace(GL_BACK)
     glFrontFace(GL_CCW)
 
-def build_scene(meshes: dict, materials: dict):
+def build_scene(window, meshes: dict, materials: dict):
     """Constructs scene graph from provided meshes and materials.
 
-    Returns (root, nodes) where `nodes` is a dict with named node references
-    for easy access (car, car_body, floor, wheels, skybox).
+    `materials` must be a dict mapping keys like 'car','wheel','floor','pole'
+    to `Material` instances. The function will attach those materials to
+    corresponding nodes. Returns the scene `root` Node.
     """
     # ensure required meshes exist
     if 'car' not in meshes or 'plane' not in meshes:
@@ -112,64 +113,44 @@ def build_scene(meshes: dict, materials: dict):
 
     root = Node('Root')
 
-    # Floor
-    floor_node = Node('Floor', local=translate(0, 0, 0) @ scale(50, 0.1, 50), mesh=plane_mesh)
-    if 'floor' in materials:
-        floor_node.material = materials['floor']
+    # Floor 
+    floor_node = Node('Floor', local=translate(0, 0, 0) @ scale(500, 0.1, 500), mesh=plane_mesh)
+    floor_node.material = materials['floor']
 
     # Car and body
-    car_node = Node('Car')
+    x_car= -15.0
+    y_car =  0.0 
+    z_car= 0.0
+    car_node = Node('Car', local=translate(x_car, y_car, z_car))
     car_body = Node('CarBody', local=translate(0, 2.00, 0) @ scale(10.0, 10.0, 10.0) @ rotate(math.radians(90), (0, 1, 0)), mesh=car_mesh)
-    if 'car' in materials:
-        car_body.material = materials['car']
+    car_body.material = materials['car']
 
     # optional left/right door meshes: attach as children of car_body so they inherit body transforms
     door_left = meshes.get('door_left', None)
     door_right = meshes.get('door_right', None)
+    door_node_l = Node('Door_L', local=translate(-0.17, -0.06, -0.0375) @ scale(0.3, 0.3, 0.3), mesh=door_left)
+    door_node_l.material = materials['door']
+    door_node_l.material = materials['car']
+    door_node_l.animator = anim.make_door_anim(door_node_l, window, glfw.KEY_K, open_angle_deg=75.0, axis=(0,1,0), speed=10.0)
+    car_body.add(door_node_l)
 
-    if door_left is not None:
-        # left door transform: slightly offset and scaled to fit the normalized OBJ
-        door_node_l = Node('Door_L', local=translate(-0.17, -0.06, -0.0375) @ scale(0.3, 0.3, 0.3), mesh=door_left)
-        if 'door_left' in materials:
-            door_node_l.material = materials['door_left']
-        elif 'door' in materials:
-            door_node_l.material = materials['door']
-        elif 'car' in materials:
-            door_node_l.material = materials['car']
-        car_body.add(door_node_l)
+    door_node_r = Node('Door_R', local=translate(0.17, -0.07, 0.0375) @ scale(0.3, 0.3, 0.3), mesh=door_right)
+    door_node_r.material = materials['door']
+    door_node_r.material = materials['car']
+    door_node_r.animator = anim.make_door_anim(door_node_r, window, glfw.KEY_L, open_angle_deg=-75.0, axis=(0,1,0), speed=10.0)
+    car_body.add(door_node_r)
 
-    if door_right is not None:
-        # right door uses mirrored Z position
-        door_node_r = Node('Door_R', local=translate(0.17, -0.07, 0.0375) @ scale(0.3, 0.3, 0.3), mesh=door_right)
-        if 'door_right' in materials:
-            door_node_r.material = materials['door_right']
-        elif 'door' in materials:
-            door_node_r.material = materials['door']
-        elif 'car' in materials:
-            door_node_r.material = materials['car']
-        car_body.add(door_node_r)
-
-    # Optional steering wheel (volante) placed inside the car body for visual steering
+    # roda de direção
     steering_mesh = meshes.get('steering_wheel', None)
-    if steering_mesh is not None:
-        # local placement: a small transform inside the car cockpit. These values may
-        # be tuned if the model appears misplaced; it's placed with a modest scale
-        # so it fits inside the scaled car_body.
-        sw_node = Node('SteeringWheel', local=translate(0.1, -0.01, 0.07) @ rotate(0.0, (1,0,0)) @ scale(0.10, 0.10, 0.10), mesh=steering_mesh)
-        # reuse wheel material if available otherwise fallback to car material
-        if 'wheel' in materials:
-            sw_node.material = materials['wheel']
-        elif 'car' in materials:
-            sw_node.material = materials['car']
-        car_body.add(sw_node)
+    sw_node = Node('SteeringWheel', local=translate(0.1, -0.01, 0.07) @ rotate(0.0, (1,0,0)) @ scale(0.10, 0.10, 0.10), mesh=steering_mesh)
+    sw_node.material = materials.get('steering', materials.get('wheel', materials['car']))
+    car_body.add(sw_node)
 
     # Wheels
     wheels = {}
     if (wheel_left is not None) or (wheel_right is not None) or (wheel_rear is not None) or (wheel_single is not None):
         
         def make_wheel(name):
-            # Front wheels (FL / FR) use wheel_left/wheel_right when available.
-            # Rear wheels (RL / RR) use wheel_rear (cylinder) or fallback to wheel_single.
             if name.endswith('FL'):
                 mesh_for_wheel = wheel_left if wheel_left is not None else (wheel_rear or wheel_single)
             elif name.endswith('FR'):
@@ -184,11 +165,9 @@ def build_scene(meshes: dict, materials: dict):
             # create wheel node with no initial transform — animator will set per-frame transforms
             n = Node(name, mesh=mesh_for_wheel)
             
-            if 'wheel' in materials:
-                n.material = materials['wheel']
+            n.material = materials['wheel']
             return n
 
-        # create all four wheel nodes
         wheels = {
             'Wheel_FL': make_wheel('Wheel_FL'),
             'Wheel_FR': make_wheel('Wheel_FR'),
@@ -196,22 +175,66 @@ def build_scene(meshes: dict, materials: dict):
             'Wheel_RR': make_wheel('Wheel_RR'),
         }
         
-        # attach wheels to the car body so they inherit car_body transforms (scale/rotation)
         car_body.add(*wheels.values())
 
     car_node.add(car_body)
 
-    nodes = {
-        'root': root,
-        'car': car_node,
-        'car_body': car_body,
-        'floor': floor_node,
-        'wheels': wheels,
-    }
+    # Estado lógico do carro
+    car_state = Car(x=x_car, z=z_car)
+
+    # Criar animador único que trata chassis + rodas
+    # attach the car animator to the Car node
+    car_node.animator = anim.make_car_animators(
+        win=window,
+        car_state=car_state,
+        car_node=car_node,
+        wheel_nodes=wheels,
+        translate=translate, rotate=rotate, scale=scale,
+    )
 
     root.add(floor_node, car_node)
+    pole_mesh = meshes.get('pole', None)
+    if pole_mesh is not None:
+        pole_node = Node('Pole', local=translate(12.0, 0.0, -6.0) @ scale(2.0, 2.0, 2.0) @ rotate(90, (0, 1, 0)), mesh=pole_mesh)
+        pole_node.material = materials.get('pole', None)
+        root.add(pole_node)
 
-    return root, nodes
+
+    light_pole_mesh = meshes.get('light_pole', None)
+
+    bulb_local_pos = translate(-0.46, 2.57, 0.0) 
+    light_pole_node = Node('LightPole', local=bulb_local_pos, mesh=light_pole_mesh)
+    light_pole_node.is_light = True
+    light_pole_node.light_color = np.array([1.0, 1.0, 0.9], dtype=np.float32)
+    light_pole_node.light_intensity = 1.1
+    light_pole_node.material = materials.get('light_pole', None)
+
+    pole_node.add(light_pole_node)
+   
+
+
+    sun_mesh = meshes.get('sun', None)
+    sun_node = Node('Sun', local=translate(0.0, 9.0, 2.0), mesh=sun_mesh)
+    sun_node.is_light = True
+    sun_node.light_color = np.array([1.0, 0.95, 0.8], dtype=np.float32)
+    sun_node.light_intensity = 1.3
+    sun_node.material = materials.get('sun', None)
+    sun_node.animator = anim.make_sun_animator(sun_node, translate=translate, rotate=rotate, scale=scale, orbit_radius=30.0, orbit_period=80.0, tilt_angle_deg=23.5)
+    root.add(sun_node)
+
+
+    go_mesh = meshes.get('go', None)
+    gd_mesh = meshes.get('gd', None)
+    go_node = Node('GO', local=translate(-15.0, 2.3, 0.0) @ scale(10.0, 10.0, 10.0) @ rotate(math.radians(90), (0, 1, 0)), mesh=go_mesh)
+    go_node.material = materials['go']
+    gd_node = Node('GD', local=translate(0, 0.0, 0.475) @ scale(0.7, 0.7, 0.7), mesh=gd_mesh)
+    gd_node.material = materials['gd']
+    gd_node.animator = anim.make_garage_door_animator(gd_node, win=window, key=glfw.KEY_F, open_offset_y=-0.4, speed=8.0)
+    
+    go_node.add(gd_node)
+    root.add(go_node)
+
+    return root
 
 def main():
     window = Window(800, 600, "Carro na rua — Grafo de cena com Flat Shading (OpenGL 3.3)")
@@ -244,16 +267,9 @@ def main():
     texture_floor = Texture(os.path.join(os.path.dirname(__file__), 'textures', 'floor.jpg'))
     plane_mesh = MeshTextured(inter, idx, texture=texture_floor)
     # Mesh do carro 
-    # try to load a real car model from objects/car.obj, fallback to procedural mesh
     car_obj_path = os.path.join(os.path.dirname(__file__), 'objects', 'car.obj')
-    try:
-        # normalize the imported model so its max dimension is ~1.0
-        # this makes the imported mesh compatible with the scene's non-uniform
-        # scales used by the procedural car body (so it won't appear stretched).
-        car_mesh = load_obj(car_obj_path, normalize=True, target_max=1.0)
-    except Exception:
-        inter, idx = gen_uv_car_body(size=1.0)
-        car_mesh = Mesh(inter, idx)
+    car_mesh = load_obj(car_obj_path, normalize=True, target_max=1.0)
+
     # Mesh de roda cilíndrica (unitária). O anim aplica a escala real.
     inter_w, idx_w = gen_uv_cylinder_flat(radius=1.0, half_width=0.5, slices=32)
     # create reusable cylinder mesh used for rear wheels and as fallback
@@ -262,48 +278,35 @@ def main():
     # Load wheel meshes: try front right/left specific objects (rfe/rfd). Rear wheels will use the cylinder.
     wheel_left_path = os.path.join(os.path.dirname(__file__), 'objects', 'rfe.obj')
     wheel_right_path = os.path.join(os.path.dirname(__file__), 'objects', 'rfd.obj')
-    wheel_mesh_left = None
-    wheel_mesh_right = None
-    try:
-        wheel_mesh_left = load_obj(wheel_left_path, normalize=True, target_max=1.0)
-    except Exception:
-        wheel_mesh_left = None
-    try:
-        wheel_mesh_right = load_obj(wheel_right_path, normalize=True, target_max=1.0)
-    except Exception:
-        wheel_mesh_right = None
-    # fallback: use procedural cylinder for any missing front wheel
-    if wheel_mesh_left is None:
-        wheel_mesh_left = wheel_cyl_mesh
-    if wheel_mesh_right is None:
-        wheel_mesh_right = wheel_cyl_mesh
-    # try to load door models (optional) — left/right
-    doorl_mesh = None
+    wheel_mesh_left =  load_obj(wheel_left_path, normalize=True, target_max=1.0)
+    wheel_mesh_right = load_obj(wheel_right_path, normalize=True, target_max=1.0)
+    # Portas 
     doorl_path = os.path.join(os.path.dirname(__file__), 'objects', 'de.obj')
     doord_path = os.path.join(os.path.dirname(__file__), 'objects', 'dd.obj')
-    try:
-        doorl_mesh = load_obj(doorl_path, normalize=True, target_max=1.0)
-    except Exception:
-        doorl_mesh = None
-
-    doord_mesh = None
-    try:
-        doord_mesh = load_obj(doord_path, normalize=True, target_max=1.0)
-    except Exception:
-        doord_mesh = None
-
-    # Steering wheel (volante) — optional model placed inside objects/wheel.obj
-    steering_mesh = None
+    doorl_mesh = load_obj(doorl_path, normalize=True, target_max=1.0)
+    doord_mesh = load_obj(doord_path, normalize=True, target_max=1.0)
     steering_path = os.path.join(os.path.dirname(__file__), 'objects', 'wheel.obj')
-    try:
-        steering_mesh = load_obj(steering_path, normalize=True, target_max=1.0)
-    except Exception:
-        steering_mesh = None
-    
-    # small sphere mesh for visualizing lights
-    inter_s, idx_s = gen_uv_sphere_flat(radius=1.0, stacks=12, slices=24)
-    sphere_mesh = Mesh(inter_s, idx_s)
-    # Skybox is handled externally (not part of scene graph)
+    steering_mesh = load_obj(steering_path, normalize=True, target_max=1.0)
+    # Para o mini-sol
+    inter_s, idx_s = gen_uv_sphere_flat(radius=0.6, stacks=12, slices=24)
+    sun_mesh = Mesh(inter_s, idx_s)
+
+    inter_s, idx_s = gen_uv_sphere_flat(radius=0.14, stacks=12, slices=24)
+    idx_s = idx_s[::-1] # Invert indices to fix winding order (CW -> CCW)
+    light_pole_mesh = Mesh(inter_s, idx_s)
+
+    pole_path = os.path.normpath(os.path.join(os.path.dirname(__file__), 'objects', 'pole2.obj'))
+    pole_mesh = load_obj(pole_path, normalize=False)
+
+
+    go_mesh = None
+    gd_mesh = None
+    go_path = os.path.join(os.path.dirname(__file__), 'objects', 'go.obj')
+    gd_path = os.path.join(os.path.dirname(__file__), 'objects', 'gd.obj')
+    go_mesh = load_obj(go_path, normalize=True, target_max=1.0)
+    gd_mesh = load_obj(gd_path, normalize=True, target_max=1.0)
+
+    # Skybox é tratada de forma separada no renderer
     mesh_dict = {
         'car': car_mesh,
         'plane': plane_mesh,
@@ -313,8 +316,13 @@ def main():
         'wheel_right': wheel_mesh_right,
         'wheel_rear': wheel_cyl_mesh,
         'steering_wheel': steering_mesh,
+        'sun': sun_mesh,
+        'light_pole': light_pole_mesh,
+        'pole': pole_mesh,
+        'go': go_mesh,
+        'gd': gd_mesh,
     }
-    resources = [car_mesh, plane_mesh, wheel_mesh_left, wheel_mesh_right, wheel_cyl_mesh, sphere_mesh]
+    resources = [car_mesh, plane_mesh, wheel_mesh_left, wheel_mesh_right, wheel_cyl_mesh, sun_mesh,light_pole_mesh ,pole_mesh]
     if steering_mesh is not None:
         resources.append(steering_mesh)
     # add loaded door meshes to resources (keeping insertion order)
@@ -323,91 +331,30 @@ def main():
     if doord_mesh is not None:
         resources.insert(3, doord_mesh)
     
-    COL_CAR = (0.8,0.1,0.1)
-    COL_WHEEL = (0.1,0.1,0.1)
-    materials = {
-        'car' : Material.from_color(shader,COL_CAR),
-        'floor': Material.from_texture(floor_shader,texture_floor)
-    }
-    # there is always a wheel mesh available (at least the procedural cylinder)
+    # create materials up-front and pass them to build_scene
+    COL_CAR = (0.8, 0.1, 0.1)
+    COL_WHEEL = (0.1, 0.1, 0.1)
+    materials = {}
+    materials['car'] = Material.from_color(shader, COL_CAR)
+    materials['floor'] = Material.from_texture(floor_shader, texture_floor)
     materials['wheel'] = Material.from_color(shader, COL_WHEEL)
+    # Volante: Preto mate (pouco brilho)
+    materials['steering'] = Material(shader, albedo_color=(0.05, 0.05, 0.05), shininess=10.0, specular_color=(0.1, 0.1, 0.1))
+    materials['pole'] = Material.from_color(shader, (0.0, 0.0, 0.0))
+    materials['sun'] = Material.from_color(shader, (1.0, 0.95, 0.8))
+    materials['light_pole'] = Material.from_color(shader, (1.0, 0.8, 0.0))
+    materials['go'] = Material.from_color(shader, (0.6, 0.6, 0.6))
+    materials['gd'] = Material.from_color(shader, (0.7, 0.7, 0.7))
+    materials['door'] = Material.from_color(shader, COL_CAR)
+    
+    root = build_scene(window, meshes=mesh_dict, materials=materials)
 
-    # door offset is local-space translation applied to the Door node (small values, car_body also scales)
-    root, nodes = build_scene(meshes=mesh_dict, materials=materials)
-
-    # --- Importar objetos go.obj e gd.obj e criar hierarquia ---
-    # carregar meshes adicionais e criar nodes: GD será filho de GO
-    go_mesh = None
-    gd_mesh = None
-    go_path = os.path.join(os.path.dirname(__file__), 'objects', 'go.obj')
-    gd_path = os.path.join(os.path.dirname(__file__), 'objects', 'gd.obj')
-    try:
-        go_mesh = load_obj(go_path, normalize=True, target_max=1.0)
-    except Exception:
-        go_mesh = None
-    try:
-        gd_mesh = load_obj(gd_path, normalize=True, target_max=1.0)
-    except Exception:
-        gd_mesh = None
-
-    # criar nodes mesmo que um dos meshes falhe (não colocar exceção aqui)
-    if go_mesh is not None:
-        # posicione o objeto um pouco à direita para evitar sobreposição com o carro
-        go_node = Node('GO', local=translate(0.0, 2.3, 0.0) @ scale(10.0, 10.0, 10.0) @ rotate(math.radians(90), (0, 1, 0)), mesh=go_mesh)
-        # material neutro para visualização
-        go_node.material = Material.from_color(shader, (0.6, 0.6, 0.6))
-        # se também houver gd_mesh, cria um node e adiciona como filho
-        if gd_mesh is not None:
-            gd_node = Node('GD', local=translate(0, 0.0, 0.475) @ scale(0.7, 0.7, 0.7), mesh=gd_mesh)
-            gd_node.material = Material.from_color(shader, (0.7, 0.7, 0.7))
-            go_node.add(gd_node)
-            # garantir que seja destruído no cleanup
-            resources.append(gd_mesh)
-        # adicionar GO (com GD como filho, se presente) à raiz da cena
-        root.add(go_node)
-        resources.append(go_mesh)
-
-    # locate the Car node and wheel nodes returned by builder
-    car_node = nodes.get('car')
+    # locate the Car node and wheel nodes from the constructed scene
+    car_node = root.find('Car')
     if car_node is None:
         raise RuntimeError("Car node not found in scene after build_scene()")
 
-    wheel_nodes = nodes.get('wheels', {})
 
-    # assign materials to Car and Floor nodes so drawing is automatic via root.draw()
-    car_node.material = Material.from_color(shader, COL_CAR)
-    floor_node = root.find('Floor')
-    if floor_node is not None:
-        # floor is textured: create a material that references the floor shader and texture
-        floor_mat = Material.from_texture(floor_shader, texture_floor)
-        floor_node.material = floor_mat
-
-    # Estado lógico do carro
-    car_state = Car()
-
-    # Criar animador único que trata chassis + rodas
-    # attach the car animator to the Car node
-    car_node.animator = anim.make_car_animators(
-        win=window,
-        car_state=car_state,
-        car_node=car_node,
-        wheel_nodes=wheel_nodes,
-        translate=translate, rotate=rotate, scale=scale,
-    )
-
-    # lookup door nodes and attach animators
-    door_l_node = root.find('Door_L')
-    door_r_node = root.find('Door_R')
-    if door_l_node is not None:
-        door_l_node.animator = anim.make_door_anim(door_l_node, window, glfw.KEY_K, open_angle_deg=75.0, axis=(0,1,0), speed=10.0)
-    if door_r_node is not None:
-        door_r_node.animator = anim.make_door_anim(door_r_node, window, glfw.KEY_L, open_angle_deg=-75.0, axis=(0,1,0), speed=10.0)
-
-    # Attach animator for garage door (GD) - toggle open/close with 'F'
-    gd_node = root.find('GD')
-    if gd_node is not None:
-        # open_offset_y controls how far the door moves along Y when opened (negative slides down)
-        gd_node.animator = anim.make_garage_door_animator(gd_node, win=window, key=glfw.KEY_F, open_offset_y=-0.4, speed=8.0)
 
     # Camera a seguir o carro (offset atrás e acima, com smoothing)
     # Camera atrás do carro (e um pouco acima). Para frente = +X, usar offset X negativo.
@@ -427,14 +374,7 @@ def main():
         look_ahead=8.0,
     )
 
-    # create a Sun node (visualized by a small sphere) and mark it as a light source
-    sun_node = Node('Sun', local=translate(0.0, 9.0, 2.0) @ scale(0.6, 0.6, 0.6), mesh=sphere_mesh)
-    sun_node.is_light = True
-    sun_node.light_color = np.array([1.0, 0.95, 0.8], dtype=np.float32)
-    sun_node.light_intensity = 2.0
-    # give it a bright material so it's visible
-    sun_node.material = Material.from_color(shader, (1.0, 0.95, 0.8))
-    root.add(sun_node)
+
 
     # dados globais da cena, camara e luz
     up  = np.array([0.0, 1.0, 0.0], dtype=np.float32)
@@ -446,16 +386,10 @@ def main():
     light_dir = np.array([0.45, 0.9, 0.35], dtype=np.float32)
     light_dir /= np.linalg.norm(light_dir)
 
-    # skybox loader (external to scene graph)
-    try:
-        sky = Skybox(shader_program=skybox_shader.prog)
-    except Exception:
-        sky = None
+    sky = Skybox(shader_program=skybox_shader.prog)
 
-    # instantiate renderer once (avoid recreating per-frame)
     renderer = Renderer()
 
-    # don't remove this variable (it's used for deltatime calculation)
     last_time = glfw.get_time()
 
     # Renderização
@@ -478,27 +412,20 @@ def main():
         elif cam.mode == 'orbit':
             cam_eye, cam_ctr = follow_cam2(deltaTime)
         else:
-            # fallback to follow behavior
             cam_eye, cam_ctr = follow_cam(deltaTime)
 
-        # create projection and view matrices
         P = perspective(math.radians(45.0), float(fbw) / float(fbh), 0.1, 100.0)
         V = lookAt(cam_eye, cam_ctr, up)
 
-        # upload projection and view into the UBO using column-major float arrays
         proj_arr = mat_to_column_major_floats(P)
         view_arr = mat_to_column_major_floats(V)
 
-        # Normal render mode: enable back-face culling and filled polygons
         glEnable(GL_CULL_FACE)
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
 
-        # clear buffers
         glClearColor(0.05, 0.05, 0.25, 1.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
    
-        # Draw the entire scene via the Renderer; it minimizes shader switches
-        # and calls node.on_draw when present.
         def _common_setup(shader_obj, lights=None):
             # upload per-shader globals: view/proj and lighting if API available
             try:
@@ -577,12 +504,7 @@ def find_node_by_name(node, name):
             return r
     return None
 
-def apply_transform_local_by_name(root, node_name, M, pre=True):
-    node = find_node_by_name(root, node_name)
-    if node is None:
-        raise RuntimeError(f"Node '{node_name}' não encontrado.")
-    node.local = (M @ node.local) if pre else (node.local @ M)
-    return node
+
 
 if __name__ == "__main__":
     main()
