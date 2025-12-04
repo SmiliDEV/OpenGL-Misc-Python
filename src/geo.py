@@ -24,13 +24,13 @@ def gen_uv_sphere_flat(radius=1.0, stacks=24, slices=48):
         for j in range(slices):
             #Cada elemento dá um QUAD, que tem que ser dividido em triangulos
             a = i*(slices+1)+j; b = a+1; c = a+(slices+1); d = c+1
-            # tri1: a,c,b
-            p0, p1, p2 = P[a], P[c], P[b]
+            # tri1: a,b,c
+            p0, p1, p2 = P[a], P[b], P[c]
             #normal <- veja-se o produto externo
             n = np.cross(p1-p0, p2-p0); ln = np.linalg.norm(n); n = n/ln if ln>0 else np.array([0,1,0], dtype=np.float32)
             tri_pos.extend([p0, p1, p2]); tri_nrm.extend([n, n, n])
-            # tri2: b,c,d
-            p0, p1, p2 = P[b], P[c], P[d]
+            # tri2: b,d,c
+            p0, p1, p2 = P[b], P[d], P[c]
             #normal <- veja-se o produto externo
             n = np.cross(p1-p0, p2-p0); 
             ln = np.linalg.norm(n); 
@@ -183,9 +183,10 @@ def gen_uv_cube_flat(size=1.0):
     for f in range(6):
         a, b, c, d = faces[f]
         n = normals[f]
-        tri_pos.extend([vertices[a], vertices[b], vertices[c]])
+        # Invertido para CCW (a,c,b) e (a,d,c)
+        tri_pos.extend([vertices[a], vertices[c], vertices[b]])
         tri_nrm.extend([n, n, n])
-        tri_pos.extend([vertices[a], vertices[c], vertices[d]])
+        tri_pos.extend([vertices[a], vertices[d], vertices[c]])
         tri_nrm.extend([n, n, n])
     tri_pos = np.array(tri_pos, dtype=np.float32).reshape(-1,3)
     tri_nrm = np.array(tri_nrm, dtype=np.float32).reshape(-1,3)

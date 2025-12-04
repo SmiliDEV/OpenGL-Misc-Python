@@ -334,13 +334,17 @@ _vao_cache = VAOCache()
 
 
 class Texture:
-    def __init__(self, path):
+    def __init__(self, path, nearest=False):
         self.id = glGenTextures(1)
         glBindTexture(GL_TEXTURE_2D, self.id)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        if nearest:
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        else:
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
         self.load_texture(path)
 
     def load_texture(self, path):
@@ -441,6 +445,7 @@ class ShaderProgram:
         self._u_specular = glGetUniformLocation(self.prog, "uSpecularColor")
         self._u_shininess = glGetUniformLocation(self.prog, "uShininess")
         self._u_diffuse_factor = glGetUniformLocation(self.prog, "uDiffuseFactor")
+        self._u_emissive = glGetUniformLocation(self.prog, "uEmissive")
 
     @classmethod
     def from_files(cls, vs_path: str, fs_path: str) -> "ShaderProgram":
@@ -494,8 +499,8 @@ class ShaderProgram:
             if self._u_lightcount != -1:
                 glUniform1i(self._u_lightcount, 0)
 
-    def set_per_object(self, model_mat: np.ndarray, albedo, specular=None, shininess=None, diffuse_factor=None) -> None:
-        """Set per-object uniforms (model, albedo, optional specular, shininess, diffuse_factor).
+    def set_per_object(self, model_mat: np.ndarray, albedo, specular=None, shininess=None, diffuse_factor=None, emissive=False) -> None:
+        """Set per-object uniforms (model, albedo, optional specular, shininess, diffuse_factor, emissive).
 
         Backwards-compatible: callers may pass only (model, albedo).
         """
@@ -511,6 +516,9 @@ class ShaderProgram:
         # diffuse factor
         if diffuse_factor is not None and self._u_diffuse_factor != -1:
             glUniform1f(self._u_diffuse_factor, float(diffuse_factor))
+        # emissive
+        if self._u_emissive != -1:
+            glUniform1i(self._u_emissive, 1 if emissive else 0)
 
     def setBool(self, name: str, value: bool) -> None:
         glUniform1i(glGetUniformLocation(self.prog, name), int(value))

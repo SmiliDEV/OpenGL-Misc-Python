@@ -13,6 +13,7 @@ from renderer import Renderer
 from window import Window
 from glib import *
 from material import Material
+import random
 from file import *
 from obj import *
 
@@ -45,10 +46,15 @@ def cursor_pos_callback(window, xpos, ypos):
     cam.pitch = max(math.radians(-85.0), min(math.radians(85.0), cam.pitch))
 
 def key_callback(win, key, sc, action, mods):
-    global follow_cam, cam
+    global follow_cam, cam, first_mouse
     if action in (glfw.PRESS, glfw.REPEAT):
         if key == glfw.KEY_ESCAPE:
             glfw.set_window_should_close(win, True)
+        elif key == glfw.KEY_Z and action == glfw.PRESS:
+            window = glfw.get_window_user_pointer(win)
+            if window:
+                window.toggle_fullscreen()
+                first_mouse = True
         elif key == glfw.KEY_SPACE and action == glfw.PRESS:
             # Cycle camera modes: free -> follow -> orbit -> free
             global follow_cam2
@@ -91,32 +97,33 @@ def setup_gl_state():
     glFrontFace(GL_CCW)
 
 def build_scene(window, meshes: dict, materials: dict):
-    """Constructs scene graph from provided meshes and materials.
-
-    `materials` must be a dict mapping keys like 'car','wheel','floor','pole'
-    to `Material` instances. The function will attach those materials to
-    corresponding nodes. Returns the scene `root` Node.
-    """
-    # ensure required meshes exist
-    if 'car' not in meshes or 'plane' not in meshes:
-        raise ValueError("meshes must include at least 'car' and 'plane'")
-
+    # Node_SC
     car_mesh = meshes.get('car')
-    plane_mesh = meshes.get('plane')
+    grass_mesh = meshes.get('grass')
+    ground_mesh = meshes.get('ground')
     # wheels can be provided as either a single 'wheel' mesh or separate 'wheel_left'/'wheel_right'
     wheel_single = meshes.get('wheel', None)
     wheel_left = meshes.get('wheel_left', None)
     wheel_right = meshes.get('wheel_right', None)
     wheel_rear = meshes.get('wheel_rear', None)
-    if wheel_left is None and wheel_right is None and wheel_single is not None:
-        wheel_left = wheel_right = wheel_single
 
     root = Node('Root')
 
     # Floor 
-    floor_node = Node('Floor', local=translate(0, 0, 0) @ scale(500, 0.1, 500), mesh=plane_mesh)
+    floor_node = Node('Floor', local=translate(0, 0, 0) @ scale(500, 0.1, 500), mesh=grass_mesh)
     floor_node.material = materials['floor']
 
+    road_mesh = meshes.get('road', None)
+    road_x = Node('RoadX', local=translate(0, 0.02, 0) @ scale(500, 1.0, 12), mesh=road_mesh)
+    road_x.material = materials['road']
+    road_z = Node('RoadZ', local=translate(0, 0.02, 0) @ rotate(math.radians(90), (0, 1, 0)) @ scale(500, 1.0, 12), mesh=road_mesh)
+    road_z.material = materials['road']
+
+    ground1 = Node('Ground1', local=translate(30, 0.02,-30) @ scale(30, 0.1,30), mesh=ground_mesh)
+    ground1.material = materials['ground']
+    ground2 = Node('Ground2', local=translate(30, 0.02,30) @ scale(30, 0.1,30), mesh=ground_mesh)
+    ground2.material = materials['ground']
+    root.add(road_x, road_z, floor_node, ground1, ground2)
     # Car and body
     x_car= -15.0
     y_car =  0.0 
@@ -200,32 +207,32 @@ def build_scene(window, meshes: dict, materials: dict):
         root.add(pole_node)
 
 
-    light_pole_mesh = meshes.get('light_pole', None)
+    light_pole_mesh = meshes.get('sphere', None)
 
-    bulb_local_pos = translate(-0.46, 2.57, 0.0) 
+    bulb_local_pos = translate(-0.46, 2.57, 0.0) @ scale(0.14, 0.14, 0.14)
     light_pole_node = Node('LightPole', local=bulb_local_pos, mesh=light_pole_mesh)
     light_pole_node.is_light = True
     light_pole_node.light_color = np.array([1.0, 1.0, 0.9], dtype=np.float32)
-    light_pole_node.light_intensity = 1.1
+    light_pole_node.light_intensity = 1.3
     light_pole_node.material = materials.get('light_pole', None)
 
     pole_node.add(light_pole_node)
    
 
 
-    sun_mesh = meshes.get('sun', None)
-    sun_node = Node('Sun', local=translate(0.0, 9.0, 2.0), mesh=sun_mesh)
+    sun_mesh = meshes.get('sphere', None)
+    sun_node = Node('Sun', local=translate(0.0, 9.0, 2.0) @ scale(0.6, 0.6, 0.6), mesh=sun_mesh)
     sun_node.is_light = True
     sun_node.light_color = np.array([1.0, 0.95, 0.8], dtype=np.float32)
-    sun_node.light_intensity = 1.3
+    sun_node.light_intensity = 1.6
     sun_node.material = materials.get('sun', None)
-    sun_node.animator = anim.make_sun_animator(sun_node, translate=translate, rotate=rotate, scale=scale, orbit_radius=30.0, orbit_period=80.0, tilt_angle_deg=23.5)
+    sun_node.animator = anim.make_sun_animator(sun_node, translate=translate, rotate=rotate, scale=scale, orbit_radius=50.0, orbit_period=80.0, tilt_angle_deg=23.5)
     root.add(sun_node)
 
 
     go_mesh = meshes.get('go', None)
     gd_mesh = meshes.get('gd', None)
-    go_node = Node('GO', local=translate(-15.0, 2.3, 0.0) @ scale(10.0, 10.0, 10.0) @ rotate(math.radians(90), (0, 1, 0)), mesh=go_mesh)
+    go_node = Node('GO', local=translate(30.0, 2.3, 30.0) @ scale(15.0, 14.0, 15.0) @ rotate(math.radians(270), (0, 1, 0)), mesh=go_mesh)
     go_node.material = materials['go']
     gd_node = Node('GD', local=translate(0, 0.0, 0.475) @ scale(0.7, 0.7, 0.7), mesh=gd_mesh)
     gd_node.material = materials['gd']
@@ -234,10 +241,24 @@ def build_scene(window, meshes: dict, materials: dict):
     go_node.add(gd_node)
     root.add(go_node)
 
+    # Gerar algumas arvores aleatórias
+    tree_parts = meshes.get('tree_parts', {})
+    min_dist = 8.0
+    add_random_trees(tree_parts=tree_parts, min_dist=min_dist, num_trees=15, root =root, materials=materials)
+
+    cafe_scale = 1.5
+    cafe_mesh = meshes.get('cafe')
+    cafe_node = Node('Cafe', local=translate(30, 2.7+ 0.5 * cafe_scale, -30) @ scale(cafe_scale, cafe_scale, cafe_scale), mesh=cafe_mesh)
+    cafe_node.material = materials.get('cafe_textura', materials.get('cafe_padrao'))
+    root.add(cafe_node)
+
+    # Adicionar parque e armazém
+    add_park(root, meshes, materials)
+
     return root
 
 def main():
-    window = Window(800, 600, "Carro na rua — Grafo de cena com Flat Shading (OpenGL 3.3)")
+    window = Window(800, 600, "Carro na rua — Grafo de cena com Flat Shading (OpenGL 3.3)", fullscreen=False)
     glfw.set_cursor_pos_callback(window.win, cursor_pos_callback)
     glfw.set_key_callback(window.win, key_callback)
     glfw.set_framebuffer_size_callback(window.win, framebuffer_size_callback)
@@ -262,10 +283,21 @@ def main():
     uboPV.bind_shader_block(floor_shader.prog, 'Matrices')
 
     # criar meshes 
-    #chao 
+    # relva
     inter, idx = gen_uv_plane_flat(size=1.0, divisions=10)
-    texture_floor = Texture(os.path.join(os.path.dirname(__file__), 'textures', 'floor.jpg'))
-    plane_mesh = MeshTextured(inter, idx, texture=texture_floor)
+    texture_grass = Texture(os.path.join(os.path.dirname(__file__), 'textures', 'grass.jpg'))
+    grass_mesh = MeshTextured(inter, idx, texture=texture_grass)
+    # estrada
+    texture_road = Texture(os.path.join(os.path.dirname(__file__), 'textures', 'road.jpg'))
+    texture_ground = Texture(os.path.join(os.path.dirname(__file__), 'textures', 'ground.jpg'))
+    
+    # Tentar carregar a textura do edificio se existir
+
+    ground_mesh = MeshTextured(inter, idx, texture=texture_ground)
+    # textura estrada usa mesma malha do plano
+    # criar mesh texturizada para estrada
+    inter[6::8] *= 40.0 
+    road_mesh = MeshTextured(inter, idx, texture=texture_road)
     # Mesh do carro 
     car_obj_path = os.path.join(os.path.dirname(__file__), 'objects', 'car.obj')
     car_mesh = load_obj(car_obj_path, normalize=True, target_max=1.0)
@@ -287,13 +319,10 @@ def main():
     doord_mesh = load_obj(doord_path, normalize=True, target_max=1.0)
     steering_path = os.path.join(os.path.dirname(__file__), 'objects', 'wheel.obj')
     steering_mesh = load_obj(steering_path, normalize=True, target_max=1.0)
-    # Para o mini-sol
-    inter_s, idx_s = gen_uv_sphere_flat(radius=0.6, stacks=12, slices=24)
-    sun_mesh = Mesh(inter_s, idx_s)
-
-    inter_s, idx_s = gen_uv_sphere_flat(radius=0.14, stacks=12, slices=24)
-    idx_s = idx_s[::-1] # Invert indices to fix winding order (CW -> CCW)
-    light_pole_mesh = Mesh(inter_s, idx_s)
+    
+    # Mesh esférica genérica (raio 1.0) para ser usada em tudo (Sol, Luz, Pedras)
+    inter_s, idx_s = gen_uv_sphere_flat(radius=1.0, stacks=12, slices=24)
+    sphere_mesh = Mesh(inter_s, idx_s)
 
     pole_path = os.path.normpath(os.path.join(os.path.dirname(__file__), 'objects', 'pole2.obj'))
     pole_mesh = load_obj(pole_path, normalize=False)
@@ -306,47 +335,116 @@ def main():
     go_mesh = load_obj(go_path, normalize=True, target_max=1.0)
     gd_mesh = load_obj(gd_path, normalize=True, target_max=1.0)
 
+    # Tree
+    tree_path = os.path.join(os.path.dirname(__file__), 'objects', 'tree.obj')
+    tree_parts = load_obj_multi(tree_path, normalize=True, target_max=1.0)
+
+    # Cafe
+    cafe_path = os.path.join(os.path.dirname(__file__), 'objects', 'building.obj')
+    cafe_mesh = load_obj(cafe_path, normalize=True, target_max=10.0)
+
+    # Primitivas para o parque e armazém
+    inter_cube, idx_cube = gen_uv_cube_flat(size=1.0)
+    cube_mesh = Mesh(inter_cube, idx_cube)
+    
     # Skybox é tratada de forma separada no renderer
     mesh_dict = {
         'car': car_mesh,
-        'plane': plane_mesh,
+        'grass': grass_mesh,
+        'road': road_mesh,
+        'ground': ground_mesh,
+        'tree_parts': tree_parts,
+        'cafe': cafe_mesh,
         'door_left': doorl_mesh,
         'door_right': doord_mesh,
         'wheel_left': wheel_mesh_left,
         'wheel_right': wheel_mesh_right,
         'wheel_rear': wheel_cyl_mesh,
         'steering_wheel': steering_mesh,
-        'sun': sun_mesh,
-        'light_pole': light_pole_mesh,
+        'esfera': sphere_mesh,
+        'cubo': cube_mesh,
         'pole': pole_mesh,
         'go': go_mesh,
         'gd': gd_mesh,
     }
-    resources = [car_mesh, plane_mesh, wheel_mesh_left, wheel_mesh_right, wheel_cyl_mesh, sun_mesh,light_pole_mesh ,pole_mesh]
-    if steering_mesh is not None:
-        resources.append(steering_mesh)
-    # add loaded door meshes to resources (keeping insertion order)
-    if doorl_mesh is not None:
-        resources.insert(2, doorl_mesh)
-    if doord_mesh is not None:
-        resources.insert(3, doord_mesh)
+    resources = [
+        car_mesh, grass_mesh, ground_mesh, road_mesh, 
+        doorl_mesh, doord_mesh, 
+        wheel_mesh_left, wheel_mesh_right, wheel_cyl_mesh, 
+        steering_mesh, 
+        sphere_mesh, pole_mesh, 
+        go_mesh, gd_mesh,
+        cube_mesh,
+        cafe_mesh
+    ]
+    resources.extend(tree_parts.values())
     
-    # create materials up-front and pass them to build_scene
+    # Materiais
     COL_CAR = (0.8, 0.1, 0.1)
     COL_WHEEL = (0.1, 0.1, 0.1)
     materials = {}
+    # carro
     materials['car'] = Material.from_color(shader, COL_CAR)
-    materials['floor'] = Material.from_texture(floor_shader, texture_floor)
+    materials['car'].shininess = 100.0
+    materials['car'].specular_color = (0.8, 0.8, 0.8)
+    # relva
+    materials['floor'] = Material.from_texture(floor_shader, texture_grass)
+    materials['floor'].specular_color = (0.0,0.0,0.0)
+    # estrada
+    materials['road'] = Material.from_texture(floor_shader, texture_road)
+    materials['road'].specular_color = (0.0,0.0,0.0)
+
+    #chao 
+    materials['ground'] = Material.from_texture(floor_shader, texture_ground)
+    materials['ground'].specular_color = (0.0,0.0,0.0)
+    materials['ground'].shininess = 3.0
+    materials['ground'].diffuse_scale = 0.6
+
+
+    # rodas
     materials['wheel'] = Material.from_color(shader, COL_WHEEL)
-    # Volante: Preto mate (pouco brilho)
+    materials['wheel'].shininess = 10.0
+    materials['wheel'].specular_color = (0.3, 0.3, 0.3)
+    # Volante: Preto
     materials['steering'] = Material(shader, albedo_color=(0.05, 0.05, 0.05), shininess=10.0, specular_color=(0.1, 0.1, 0.1))
+    # Poste de luz
     materials['pole'] = Material.from_color(shader, (0.0, 0.0, 0.0))
+    materials['pole'].specular_color = (0.1, 0.1, 0.1)
+    # Sol
+    # O emissive faz o sol ter apenas a cor dele 
     materials['sun'] = Material.from_color(shader, (1.0, 0.95, 0.8))
-    materials['light_pole'] = Material.from_color(shader, (1.0, 0.8, 0.0))
-    materials['go'] = Material.from_color(shader, (0.6, 0.6, 0.6))
-    materials['gd'] = Material.from_color(shader, (0.7, 0.7, 0.7))
+    materials['sun'].emissive = True    
+    # Luz do poste de luz
+    materials['light_pole'] = Material.from_color(shader, (1.0, 0.95, 0.8))
+    materials['light_pole'].emissive = True
+    # Garagem
+    materials['go'] = Material.from_color(shader, (0.5, 0.5, 0.5))
+    materials['go'].shininess = 3.0
+    materials['go'].specular_color = (0.0,0.0,0.0)
+    # Porta da garagem
+    materials['gd'] = Material.from_color(shader, (0.7, 0.7, 0.9))
+    materials['gd'].shininess = 32.0
+    materials['gd'].specular_color = (0.2, 0.2, 0.2)
+    # Portas do carro
     materials['door'] = Material.from_color(shader, COL_CAR)
+    materials['door'].shininess = 100.0
+    materials['door'].specular_color = (0.8, 0.8, 0.8)
     
+    # Arvore
+    materials['bark'] = Material.from_color(shader, (0.4, 0.25, 0.1)) # Castanho
+    materials['bark'].shininess = 5.0
+    materials['bark'].specular_color = (0.0, 0.0, 0.0)
+
+    materials['bf_wood'] = Material.from_color(shader, (0.1, 0.4, 0.1)) # Verde escuro
+    materials['bf_wood'].shininess = 1.0
+    materials['bf_wood'].specular_color = (0.0, 0.0, 0.0)
+
+    # Materiais para o parque  
+    materials['pedra'] = Material.from_color(shader, (0.5, 0.5, 0.55)) # Cinzento
+    materials['madeira_banco'] = Material.from_color(shader, (0.6, 0.4, 0.2)) # Madeira clara
+    materials['cafe_textura'] = Material.from_color(shader, (0.7, 0.5, 0.3)) # Castanho claro
+    materials['cafe_textura'].specular_color = (0.1, 0.1, 0.1)
+    materials['cafe_textura'].shininess = 10.0
     root = build_scene(window, meshes=mesh_dict, materials=materials)
 
     # locate the Car node and wheel nodes from the constructed scene
@@ -504,6 +602,96 @@ def find_node_by_name(node, name):
             return r
     return None
 
+
+def add_random_trees(root,materials,min_dist, num_trees,tree_parts):
+    tree_positions = []
+    for i in range(num_trees):
+        attempts = 0
+        found_pos = False
+        tx, tz = 0, 0
+        # mudança de while true pra attempts pra evitar um caso rarissimo de loop eterno
+        while attempts < 100:
+            attempts += 1
+            tx = random.uniform(-20, 50)
+            tz = random.uniform(-50, 50)
+            
+            # Nao meter na estrada
+            if abs(tx) < 7 or abs(tz) < 7: 
+                continue
+            # Nao meter na garagem
+            if (5 < tx < 45) and (20 < tz < 40):
+                continue
+            # Nao meter no chao
+            if (15 < tx < 45) and ((-45 < tz < -15) or (15 < tz < 45)):
+                continue
+            
+            # Ver se tao perto de outras arvores
+            too_close = False
+            for (ex, ez) in tree_positions:
+                if math.sqrt((tx - ex)**2 + (tz - ez)**2) < min_dist:
+                    too_close = True
+                    break
+            if too_close:
+                continue
+                
+            found_pos = True
+            tree_positions.append((tx, tz))
+            break
+        
+        if not found_pos:
+            continue
+                
+        s = random.uniform(1.5, 2.5)
+        r = random.uniform(0, 360)
+            
+        t_node = Node(f'Tree_{i}', local=translate(tx, 1.5 * s, tz) @ rotate(r, (0, 1, 0)) @ scale(2*s, 3*s, 2*s))
+            
+        for mtl_name, mesh_part in tree_parts.items():
+            part_node = Node(f'Tree_{i}_{mtl_name}', mesh=mesh_part)
+            part_node.material = materials.get(mtl_name, materials.get('bark'))
+            t_node.add(part_node)
+                
+        root.add(t_node)
+
+
+
+# tira um pouco da poluicao do build_scene
+def add_park(root, meshes, materials):
+    sphere_mesh = meshes.get('esfera')
+    cube_mesh = meshes.get('cubo')
+
+    park_node = Node('ParkElements', local=translate(30, 0, -30))
+
+    # Pedras (espalhadas mais longe)
+    for i in range(5):
+        angle = random.uniform(0, 360)
+        dist = random.uniform(10, 14)
+        px = dist * math.sin(math.radians(angle))
+        pz = dist * math.cos(math.radians(angle))
+        s = random.uniform(0.3, 0.7)
+        pedra = Node(f'Pedra_{i}', local=translate(px, s*0.4, pz) @ scale(s, s*0.6, s), mesh=sphere_mesh)
+        pedra.material = materials['pedra']
+        park_node.add(pedra)
+    # Bancos (simples: 1 corpo + 2 pernas)
+    def criar_banco(name, x, z, rot):
+        banco = Node(name, local=translate(x, 0, z) @ rotate(math.radians(rot), (0,1,0)) @ scale(1.5, 1.5, 1.5))
+        assento = Node('Assento', local=translate(0, 0.6, 0) @ scale(2.0, 0.1, 0.6), mesh=cube_mesh)
+        perna1 = Node('Perna1', local=translate(-0.8, 0.3, 0) @ scale(0.2, 0.6, 0.5), mesh=cube_mesh)
+        perna2 = Node('Perna2', local=translate(0.8, 0.3, 0) @ scale(0.2, 0.6, 0.5), mesh=cube_mesh)
+        assento.material = materials['madeira_banco']
+        perna1.material = materials['madeira_banco']
+        perna2.material = materials['madeira_banco']
+        banco.add(assento, perna1, perna2)
+        return banco
+
+    # Bancos à volta do edifício, virados para ele
+    dist_banco = 10.0
+    park_node.add(criar_banco('Banco1', 0, dist_banco, 180))   # Frente (Z+), virado para trás
+    park_node.add(criar_banco('Banco2', 0, -dist_banco, 0))    # Trás (Z-), virado para frente
+    park_node.add(criar_banco('Banco3', -dist_banco, 0, -90))  # Esquerda (X-), virado para direita
+    park_node.add(criar_banco('Banco4', dist_banco, 0, 90))    # Direita (X+), virado para esquerda
+    
+    root.add(park_node)
 
 
 if __name__ == "__main__":

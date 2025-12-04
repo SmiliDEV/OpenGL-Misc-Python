@@ -20,8 +20,15 @@ uniform vec3 uLightPos[4];
 uniform vec3 uLightCol[4];
 uniform float uLightInt[4];
 
+uniform int uEmissive; // 0 = false, 1 = true
+
 void main()
 {
+    if (uEmissive != 0) {
+        FragColor = vec4(uAlbedo, 1.0);
+        return;
+    }
+
     vec3 N = normalize(normal);
 
     // view vector

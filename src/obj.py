@@ -138,7 +138,121 @@ def load_obj(path: str, scale: float = 1.0, normalize: bool = False, target_max:
         return Mesh(inter6, i_arr)
 
 
+def load_obj_multi(path: str, scale: float = 1.0, normalize: bool = False, target_max: float = 1.0, center: bool = True) -> Dict[str, Mesh]:
+    """Load a Wavefront OBJ and return a dict of {material_name: Mesh}."""
+    if not os.path.isfile(path):
+        raise FileNotFoundError(path)
+
+    positions = []
+    texcoords = []
+    normals = []
+    
+    faces_by_mtl: Dict[str, List[List[Tuple[Optional[int], Optional[int], Optional[int]]]]] = {}
+    current_mtl = 'default'
+    faces_by_mtl[current_mtl] = []
+
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            if not line or line[0] == '#':
+                continue
+            parts = line.strip().split()
+            if not parts:
+                continue
+            p0 = parts[0]
+            if p0 == 'v':
+                positions.append((float(parts[1]), float(parts[2]), float(parts[3])))
+            elif p0 == 'vt':
+                texcoords.append((float(parts[1]), float(parts[2])))
+            elif p0 == 'vn':
+                normals.append((float(parts[1]), float(parts[2]), float(parts[3])))
+            elif p0 == 'usemtl':
+                current_mtl = parts[1]
+                if current_mtl not in faces_by_mtl:
+                    faces_by_mtl[current_mtl] = []
+            elif p0 == 'f':
+                face = []
+                for tok in parts[1:]:
+                    comps = tok.split('/')
+                    vi = int(comps[0]) if comps[0] != '' else None
+                    vti = int(comps[1]) if len(comps) >= 2 and comps[1] != '' else None
+                    vni = int(comps[2]) if len(comps) >= 3 and comps[2] != '' else None
+                    face.append((vi, vti, vni))
+                faces_by_mtl[current_mtl].append(face)
+
+    # Normalize positions globally
+    if normalize and len(positions) > 0:
+        pos_arr = np.asarray(positions, dtype=np.float32)
+        mn = pos_arr.min(axis=0)
+        mx = pos_arr.max(axis=0)
+        if center:
+            ctr = (mn + mx) * 0.5
+            pos_arr -= ctr
+        ext = mx - mn
+        max_dim = float(max(ext[0], ext[1], ext[2])) if ext is not None else 0.0
+        if max_dim > 0.0:
+            factor = float(target_max) / max_dim
+            pos_arr *= factor
+        if scale != 1.0:
+            pos_arr *= float(scale)
+        positions = [tuple(p) for p in pos_arr.tolist()]
+
+    result_meshes = {}
+
+    for mtl_name, faces in faces_by_mtl.items():
+        if not faces:
+            continue
+
+        unique = {}
+        vertex_list = []
+        index_list = []
+
+        for face in faces:
+            if len(face) < 3: continue
+            tri_indices = []
+            for comp in face:
+                key = comp
+                if key in unique:
+                    idx = unique[key]
+                else:
+                    vi, vti, vni = key
+                    if vi is None: continue
+                    vi_fixed = _fix_index(vi, len(positions))
+                    pos = positions[vi_fixed]
+                    
+                    if vni is not None:
+                        vn_fixed = _fix_index(vni, len(normals))
+                        n = normals[vn_fixed]
+                    else:
+                        n = (0.0, 0.0, 0.0)
+                    
+                    if vti is not None:
+                        vt_fixed = _fix_index(vti, len(texcoords))
+                        uv = texcoords[vt_fixed]
+                    else:
+                        uv = (0.0, 0.0)
+
+                    vertex_list.extend([float(pos[0]), float(pos[1]), float(pos[2])])
+                    vertex_list.extend([float(n[0]), float(n[1]), float(n[2])])
+                    vertex_list.extend([float(uv[0]), float(uv[1])])
+                    idx = len(unique)
+                    unique[key] = idx
+                tri_indices.append(idx)
+            
+            for i in range(1, len(tri_indices) - 1):
+                index_list.append(tri_indices[0])
+                index_list.append(tri_indices[i])
+                index_list.append(tri_indices[i + 1])
+
+        if len(vertex_list) == 0:
+            continue
+
+        v_arr = np.asarray(vertex_list, dtype=np.float32)
+        i_arr = np.asarray(index_list, dtype=np.uint32)
+        
+        mesh = MeshTextured(v_arr.reshape(-1, 8).astype(np.float32).flatten(), i_arr, texture=None)
+        result_meshes[mtl_name] = mesh
+
+    return result_meshes
 
 
-
-__all__ = ['load_obj']
+__all__ = ['load_obj', 'load_obj_multi']
