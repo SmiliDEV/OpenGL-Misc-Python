@@ -40,8 +40,11 @@ class Skybox:
         tex = TextureCube(faces)
         return tex.id
 
-    def __init__(self, shader_program: int):
-        self.cubemap_tex = self.load_cubemap(os.path.join(os.path.dirname(__file__), 'textures', 'skybox'))        
+    def __init__(self, shader_program: int, texture_folder: str = None):
+        if texture_folder is None:
+            texture_folder = os.path.join(os.path.dirname(__file__), 'textures', 'skybox')
+        
+        self.cubemap_tex = self.load_cubemap(texture_folder)        
         self.skybox_program = shader_program
         self.skybox_vertices = np.array([
             -1.0,  1.0, -1.0,

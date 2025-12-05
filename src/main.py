@@ -1,21 +1,27 @@
+# Fazemos import explicito em alguns modulos para evitar possiveis conflitos e explicitar as funcoes usadas
 import math, os
 import numpy as np
 import glfw
-from OpenGL.GL import *
+from OpenGL.GL import (
+    glViewport, glEnable, glCullFace, glFrontFace, glClearColor, glClear, glPolygonMode,
+    glGetUniformLocation, glUniform3fv, glUniform1i,
+    GL_DEPTH_TEST, GL_CULL_FACE, GL_BACK, GL_CCW, GL_FRONT_AND_BACK, GL_FILL,
+    GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT
+)
 import anim
 from carro import Car
 from camera import Camera, update_free_camera, get_view_free
 from node import Node
-from math3d import *
-from geo import *
+from math3d import perspective, lookAt, mat_to_column_major_floats, translate, scale, rotate
+from geo import gen_uv_plane_flat, gen_uv_cylinder_flat, gen_uv_sphere_flat, gen_uv_cube_flat
 from skybox import Skybox, draw_skybox_loader
 from renderer import Renderer
 from window import Window
-from glib import *
+from glib import Shader, ShaderProgram, wrapperCreateShader, UniformBuffer, Texture, Mesh, MeshTextured
 from material import Material
 import random
-from file import *
-from obj import *
+from file import get_content_of_file_project
+from obj import load_obj, load_obj_multi
 
 width = 800
 height = 600
@@ -45,31 +51,33 @@ def cursor_pos_callback(window, xpos, ypos):
     cam.pitch += yoffset
     cam.pitch = max(math.radians(-85.0), min(math.radians(85.0), cam.pitch))
 
+# Teclas e comportamentos
 def key_callback(win, key, sc, action, mods):
     global follow_cam, cam, first_mouse
     if action in (glfw.PRESS, glfw.REPEAT):
+        # terminar programa
         if key == glfw.KEY_ESCAPE:
             glfw.set_window_should_close(win, True)
+        # alternar fullscreen
         elif key == glfw.KEY_Z and action == glfw.PRESS:
             window = glfw.get_window_user_pointer(win)
             if window:
                 window.toggle_fullscreen()
                 first_mouse = True
+        # alternar modos de camera
         elif key == glfw.KEY_SPACE and action == glfw.PRESS:
-            # Cycle camera modes: free -> follow -> orbit -> free
+            # Ciclo: free -> follow -> inside -> free...
             global follow_cam2
-            modes = ['free', 'follow', 'orbit']
+            modes = ['free', 'follow', 'inside']
             idx = modes.index(cam.mode) if cam.mode in modes else 0
             new_mode = modes[(idx + 1) % len(modes)]
 
-            # If switching to free, seed the free camera from the previous mode's view
             if new_mode == 'free':
                 eye, ctr = None, None
                 if cam.mode == 'follow' and follow_cam is not None:
                     eye, ctr = follow_cam(0.0)
-                elif cam.mode == 'orbit' and follow_cam2 is not None:
+                elif cam.mode == 'inside' and follow_cam2 is not None:
                     eye, ctr = follow_cam2(0.0)
-                # fall back to follow_cam for initialization if no other source
                 if eye is None and follow_cam is not None:
                     eye, ctr = follow_cam(0.0)
                 if eye is not None and ctr is not None:
@@ -97,100 +105,91 @@ def setup_gl_state():
     glFrontFace(GL_CCW)
 
 def build_scene(window, meshes: dict, materials: dict):
-    # Node_SC
-    car_mesh = meshes.get('car')
-    grass_mesh = meshes.get('grass')
-    ground_mesh = meshes.get('ground')
-    # wheels can be provided as either a single 'wheel' mesh or separate 'wheel_left'/'wheel_right'
-    wheel_single = meshes.get('wheel', None)
-    wheel_left = meshes.get('wheel_left', None)
-    wheel_right = meshes.get('wheel_right', None)
-    wheel_rear = meshes.get('wheel_rear', None)
+    # -------------------------------------------------------------------------
+    # 1. Inicializar Meshes
+    # -------------------------------------------------------------------------
+    car_mesh = meshes['car']
+    grass_mesh = meshes['grass']
+    ground_mesh = meshes['ground']
+    road_mesh = meshes['road']
+    wheel_left = meshes.get('wheel_left')
+    wheel_right = meshes.get('wheel_right')
+    wheel_rear = meshes.get('wheel_rear')
+    wheel_single = meshes.get('wheel_rear') # Fallback
+    door_left = meshes.get('door_left')
+    door_right = meshes.get('door_right')
+    steering_mesh = meshes.get('steering_wheel')
+    pole_mesh = meshes.get('pole')
+    light_pole_mesh = meshes.get('esfera')
+    aviao_mesh = meshes.get('aviao')
+    sun_mesh = meshes.get('esfera')
+    go_mesh = meshes.get('go')
+    gd_mesh = meshes.get('gd')
+    cafe_mesh = meshes.get('cafe')
+    tree_parts = meshes.get('tree_parts', {})
 
+    # -------------------------------------------------------------------------
+    # 2. Criar Nodes
+    # -------------------------------------------------------------------------
     root = Node('Root')
 
-    # Floor 
+    # --- Ambiente (Chão, Estrada, Relva) ---
     floor_node = Node('Floor', local=translate(0, 0, 0) @ scale(500, 0.1, 500), mesh=grass_mesh)
     floor_node.material = materials['floor']
 
-    road_mesh = meshes.get('road', None)
     road_x = Node('RoadX', local=translate(0, 0.02, 0) @ scale(500, 1.0, 12), mesh=road_mesh)
     road_x.material = materials['road']
+    
     road_z = Node('RoadZ', local=translate(0, 0.02, 0) @ rotate(math.radians(90), (0, 1, 0)) @ scale(500, 1.0, 12), mesh=road_mesh)
     road_z.material = materials['road']
 
     ground1 = Node('Ground1', local=translate(30, 0.02,-30) @ scale(30, 0.1,30), mesh=ground_mesh)
     ground1.material = materials['ground']
+    
     ground2 = Node('Ground2', local=translate(30, 0.02,30) @ scale(30, 0.1,30), mesh=ground_mesh)
     ground2.material = materials['ground']
-    root.add(road_x, road_z, floor_node, ground1, ground2)
-    # Car and body
-    x_car= -15.0
-    y_car =  0.0 
-    z_car= 0.0
+
+    # --- Carro ---
+    x_car, y_car, z_car = -15.0, 0.0, 0.0
     car_node = Node('Car', local=translate(x_car, y_car, z_car))
+    
     car_body = Node('CarBody', local=translate(0, 2.00, 0) @ scale(10.0, 10.0, 10.0) @ rotate(math.radians(90), (0, 1, 0)), mesh=car_mesh)
     car_body.material = materials['car']
 
-    # optional left/right door meshes: attach as children of car_body so they inherit body transforms
-    door_left = meshes.get('door_left', None)
-    door_right = meshes.get('door_right', None)
+    # Portas
     door_node_l = Node('Door_L', local=translate(-0.17, -0.06, -0.0375) @ scale(0.3, 0.3, 0.3), mesh=door_left)
-    door_node_l.material = materials['door']
     door_node_l.material = materials['car']
     door_node_l.animator = anim.make_door_anim(door_node_l, window, glfw.KEY_K, open_angle_deg=75.0, axis=(0,1,0), speed=10.0)
-    car_body.add(door_node_l)
 
     door_node_r = Node('Door_R', local=translate(0.17, -0.07, 0.0375) @ scale(0.3, 0.3, 0.3), mesh=door_right)
-    door_node_r.material = materials['door']
     door_node_r.material = materials['car']
     door_node_r.animator = anim.make_door_anim(door_node_r, window, glfw.KEY_L, open_angle_deg=-75.0, axis=(0,1,0), speed=10.0)
-    car_body.add(door_node_r)
 
-    # roda de direção
-    steering_mesh = meshes.get('steering_wheel', None)
+    # Volante
     sw_node = Node('SteeringWheel', local=translate(0.1, -0.01, 0.07) @ rotate(0.0, (1,0,0)) @ scale(0.10, 0.10, 0.10), mesh=steering_mesh)
     sw_node.material = materials.get('steering', materials.get('wheel', materials['car']))
-    car_body.add(sw_node)
 
-    # Wheels
-    wheels = {}
-    if (wheel_left is not None) or (wheel_right is not None) or (wheel_rear is not None) or (wheel_single is not None):
+    # Rodas
+    def make_wheel(name):
+        if name.endswith('FL'): mesh_for_wheel = wheel_left or wheel_rear or wheel_single
+        elif name.endswith('FR'): mesh_for_wheel = wheel_right or wheel_rear or wheel_single
+        elif name.endswith('RL'): mesh_for_wheel = wheel_left or wheel_rear or wheel_single
+        elif name.endswith('RR'): mesh_for_wheel = wheel_right or wheel_rear or wheel_single
+        else: mesh_for_wheel = wheel_rear or wheel_single
         
-        def make_wheel(name):
-            if name.endswith('FL'):
-                mesh_for_wheel = wheel_left if wheel_left is not None else (wheel_rear or wheel_single)
-            elif name.endswith('FR'):
-                mesh_for_wheel = wheel_right if wheel_right is not None else (wheel_rear or wheel_single)
-            elif name.endswith('RL'):
-                mesh_for_wheel = wheel_left if wheel_left is not None else (wheel_rear or wheel_single)
-            elif name.endswith('RR'):
-                mesh_for_wheel = wheel_right if wheel_right is not None else (wheel_rear or wheel_single)
-            else:
-                mesh_for_wheel = wheel_rear if wheel_rear is not None else wheel_single
-            
-            # create wheel node with no initial transform — animator will set per-frame transforms
-            n = Node(name, mesh=mesh_for_wheel)
-            
-            n.material = materials['wheel']
-            return n
+        n = Node(name, mesh=mesh_for_wheel)
+        n.material = materials['wheel']
+        return n
 
-        wheels = {
-            'Wheel_FL': make_wheel('Wheel_FL'),
-            'Wheel_FR': make_wheel('Wheel_FR'),
-            'Wheel_RL': make_wheel('Wheel_RL'),
-            'Wheel_RR': make_wheel('Wheel_RR'),
-        }
-        
-        car_body.add(*wheels.values())
+    wheels = {
+        'Wheel_FL': make_wheel('Wheel_FL'),
+        'Wheel_FR': make_wheel('Wheel_FR'),
+        'Wheel_RL': make_wheel('Wheel_RL'),
+        'Wheel_RR': make_wheel('Wheel_RR'),
+    }
 
-    car_node.add(car_body)
-
-    # Estado lógico do carro
+    # Animador do Carro
     car_state = Car(x=x_car, z=z_car)
-
-    # Criar animador único que trata chassis + rodas
-    # attach the car animator to the Car node
     car_node.animator = anim.make_car_animators(
         win=window,
         car_state=car_state,
@@ -199,60 +198,78 @@ def build_scene(window, meshes: dict, materials: dict):
         translate=translate, rotate=rotate, scale=scale,
     )
 
-    root.add(floor_node, car_node)
-    pole_mesh = meshes.get('pole', None)
-    if pole_mesh is not None:
-        pole_node = Node('Pole', local=translate(12.0, 0.0, -6.0) @ scale(2.0, 2.0, 2.0) @ rotate(90, (0, 1, 0)), mesh=pole_mesh)
-        pole_node.material = materials.get('pole', None)
-        root.add(pole_node)
-
-
-    light_pole_mesh = meshes.get('sphere', None)
-
+    # --- Poste de Luz ---
+    pole_node = Node('Pole', local=translate(12.0, 0.0, -6.0) @ scale(2.0, 2.0, 2.0) @ rotate(90, (0, 1, 0)), mesh=pole_mesh)
+    pole_node.material = materials.get('pole', None)
+    
     bulb_local_pos = translate(-0.46, 2.57, 0.0) @ scale(0.14, 0.14, 0.14)
     light_pole_node = Node('LightPole', local=bulb_local_pos, mesh=light_pole_mesh)
     light_pole_node.is_light = True
     light_pole_node.light_color = np.array([1.0, 1.0, 0.9], dtype=np.float32)
     light_pole_node.light_intensity = 1.3
     light_pole_node.material = materials.get('light_pole', None)
-
     pole_node.add(light_pole_node)
-   
 
+    # --- Avião ---
+    aviao_node = Node('Aviao', mesh=aviao_mesh)
+    aviao_node.animator = anim.make_plane_animator(
+        node=aviao_node,
+        center_pos=(20.0, 0.0, 20.0),
+        axis=(0.2, 1.0, 0.2),
+        radius=20.0,
+        speed=1.5,
+        height=20.0,
+        scale_factor=5.0,
+        spin_speed=1.0 
+    )
+    aviao_node.material = materials.get('aviao', None)
 
-    sun_mesh = meshes.get('sphere', None)
+    # --- Sol ---
     sun_node = Node('Sun', local=translate(0.0, 9.0, 2.0) @ scale(0.6, 0.6, 0.6), mesh=sun_mesh)
     sun_node.is_light = True
     sun_node.light_color = np.array([1.0, 0.95, 0.8], dtype=np.float32)
-    sun_node.light_intensity = 1.6
+    sun_node.light_intensity = 2.0
     sun_node.material = materials.get('sun', None)
     sun_node.animator = anim.make_sun_animator(sun_node, translate=translate, rotate=rotate, scale=scale, orbit_radius=50.0, orbit_period=80.0, tilt_angle_deg=23.5)
-    root.add(sun_node)
 
-
-    go_mesh = meshes.get('go', None)
-    gd_mesh = meshes.get('gd', None)
+    # --- Garagem ---
     go_node = Node('GO', local=translate(30.0, 2.3, 30.0) @ scale(15.0, 14.0, 15.0) @ rotate(math.radians(270), (0, 1, 0)), mesh=go_mesh)
     go_node.material = materials['go']
+    
     gd_node = Node('GD', local=translate(0, 0.0, 0.475) @ scale(0.7, 0.7, 0.7), mesh=gd_mesh)
     gd_node.material = materials['gd']
     gd_node.animator = anim.make_garage_door_animator(gd_node, win=window, key=glfw.KEY_F, open_offset_y=-0.4, speed=8.0)
-    
     go_node.add(gd_node)
-    root.add(go_node)
 
-    # Gerar algumas arvores aleatórias
-    tree_parts = meshes.get('tree_parts', {})
-    min_dist = 8.0
-    add_random_trees(tree_parts=tree_parts, min_dist=min_dist, num_trees=15, root =root, materials=materials)
-
+    # --- Café ---
     cafe_scale = 1.5
-    cafe_mesh = meshes.get('cafe')
     cafe_node = Node('Cafe', local=translate(30, 2.7+ 0.5 * cafe_scale, -30) @ scale(cafe_scale, cafe_scale, cafe_scale), mesh=cafe_mesh)
     cafe_node.material = materials.get('cafe_textura', materials.get('cafe_padrao'))
+
+    # -------------------------------------------------------------------------
+    # 3. Construir Hierarquia (Adicionar Nodes)
+    # -------------------------------------------------------------------------
+    
+    # Montar Carro
+    car_body.add(door_node_l)
+    car_body.add(door_node_r)
+    car_body.add(sw_node)
+    car_body.add(*wheels.values())
+    car_node.add(car_body)
+
+    # Adicionar tudo à Root
+    root.add(floor_node)
+    root.add(road_x, road_z)
+    root.add(ground1, ground2)
+    root.add(car_node)
+    root.add(pole_node)
+    root.add(aviao_node)
+    root.add(sun_node)
+    root.add(go_node)
     root.add(cafe_node)
 
-    # Adicionar parque e armazém
+    # Funções auxiliares que já adicionam à root internamente
+    add_random_trees(tree_parts=tree_parts, min_dist=8.0, num_trees=15, root=root, materials=materials)
     add_park(root, meshes, materials)
 
     return root
@@ -267,7 +284,7 @@ def main():
     # UBOs
     uboPV = UniformBuffer(np.zeros(2 * 16, dtype=np.float32), binding_point=0)  # espaço para 2 matrizes 4x4 (P e V)
 
-    # Shaders
+    # Shaders_SC
     vs_path = os.path.join(os.path.dirname(__file__), 'shaders', 'basic.vert')
     fs_path = os.path.join(os.path.dirname(__file__), 'shaders', 'basic.frag')
     shader = ShaderProgram.from_files(vs_path, fs_path)
@@ -282,7 +299,7 @@ def main():
     uboPV.bind_shader_block(shader.prog, 'Matrices')
     uboPV.bind_shader_block(floor_shader.prog, 'Matrices')
 
-    # criar meshes 
+    # criar meshes_SC
     # relva
     inter, idx = gen_uv_plane_flat(size=1.0, divisions=10)
     texture_grass = Texture(os.path.join(os.path.dirname(__file__), 'textures', 'grass.jpg'))
@@ -327,6 +344,9 @@ def main():
     pole_path = os.path.normpath(os.path.join(os.path.dirname(__file__), 'objects', 'pole2.obj'))
     pole_mesh = load_obj(pole_path, normalize=False)
 
+    aviao_path = os.path.join(os.path.dirname(__file__), 'objects', 'aviao.obj')
+    aviao_mesh = load_obj(aviao_path, normalize=True, target_max=1.0)
+
 
     go_mesh = None
     gd_mesh = None
@@ -351,6 +371,7 @@ def main():
     mesh_dict = {
         'car': car_mesh,
         'grass': grass_mesh,
+        'aviao': aviao_mesh,
         'road': road_mesh,
         'ground': ground_mesh,
         'tree_parts': tree_parts,
@@ -375,7 +396,8 @@ def main():
         sphere_mesh, pole_mesh, 
         go_mesh, gd_mesh,
         cube_mesh,
-        cafe_mesh
+        cafe_mesh,
+        aviao_mesh
     ]
     resources.extend(tree_parts.values())
     
@@ -387,6 +409,10 @@ def main():
     materials['car'] = Material.from_color(shader, COL_CAR)
     materials['car'].shininess = 100.0
     materials['car'].specular_color = (0.8, 0.8, 0.8)
+    # aviao 
+    materials['aviao'] = Material.from_color(shader, (0.9, 0.9, 0.9))
+    materials['aviao'].shininess = 50.0
+    materials['aviao'].specular_color = (0.5, 0.5, 0.5)
     # relva
     materials['floor'] = Material.from_texture(floor_shader, texture_grass)
     materials['floor'].specular_color = (0.0,0.0,0.0)
@@ -418,11 +444,11 @@ def main():
     materials['light_pole'] = Material.from_color(shader, (1.0, 0.95, 0.8))
     materials['light_pole'].emissive = True
     # Garagem
-    materials['go'] = Material.from_color(shader, (0.5, 0.5, 0.5))
+    materials['go'] = Material.from_color(shader, (0.2, 0.2, 0.2))
     materials['go'].shininess = 3.0
     materials['go'].specular_color = (0.0,0.0,0.0)
     # Porta da garagem
-    materials['gd'] = Material.from_color(shader, (0.7, 0.7, 0.9))
+    materials['gd'] = Material.from_color(shader, (0.5, 0.5, 0.6))
     materials['gd'].shininess = 32.0
     materials['gd'].specular_color = (0.2, 0.2, 0.2)
     # Portas do carro
@@ -447,12 +473,8 @@ def main():
     materials['cafe_textura'].shininess = 10.0
     root = build_scene(window, meshes=mesh_dict, materials=materials)
 
-    # locate the Car node and wheel nodes from the constructed scene
+    # Necessario para a camara
     car_node = root.find('Car')
-    if car_node is None:
-        raise RuntimeError("Car node not found in scene after build_scene()")
-
-
 
     # Camera a seguir o carro (offset atrás e acima, com smoothing)
     # Camera atrás do carro (e um pouco acima). Para frente = +X, usar offset X negativo.
@@ -484,7 +506,13 @@ def main():
     light_dir = np.array([0.45, 0.9, 0.35], dtype=np.float32)
     light_dir /= np.linalg.norm(light_dir)
 
-    sky = Skybox(shader_program=skybox_shader.prog)
+    # Configuração da Skybox
+    # Mudar o nome da pasta aqui para trocar de skybox (ex: 'skybox', 'skybox_night', etc.)
+    # Opcoes: 'skybox' (original), 'fantasy_day', 'fantasy_sunless', 'fantasy_night'
+    SKYBOX_COLLECTION = 'fantasy_sunless' 
+    skybox_path = os.path.join(os.path.dirname(__file__), 'textures', SKYBOX_COLLECTION)
+    
+    sky = Skybox(shader_program=skybox_shader.prog, texture_folder=skybox_path)
 
     renderer = Renderer()
 
@@ -494,11 +522,9 @@ def main():
     while not window.should_close():
         glfw.poll_events()
         
-        # deltatime
         current_time = glfw.get_time()
         deltaTime = current_time - last_time
         last_time = current_time
-
         fbw, fbh = window.get_framebuffer_size()
 
         # Seleciona modo de camera — atualizar a free cam se necessário
@@ -507,7 +533,7 @@ def main():
             cam_eye, cam_ctr = get_view_free(cam)
         elif cam.mode == 'follow':
             cam_eye, cam_ctr = follow_cam(deltaTime)
-        elif cam.mode == 'orbit':
+        elif cam.mode == 'inside':
             cam_eye, cam_ctr = follow_cam2(deltaTime)
         else:
             cam_eye, cam_ctr = follow_cam(deltaTime)
@@ -525,42 +551,8 @@ def main():
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
    
         def _common_setup(shader_obj, lights=None):
-            # upload per-shader globals: view/proj and lighting if API available
-            try:
-                if hasattr(shader_obj, 'set_common'):
-                    # pass collected point lights (if any) to shader wrapper
-                    shader_obj.set_common(V, P, light_dir, ambient, light_diffuse, lights)
-                else:
-                    # fallback: try to set uView/uProj uniforms directly
-                    prog = getattr(shader_obj, 'prog', None)
-
-                    if prog is not None:                        
-                        # also try to set lighting uniforms for older shader wrappers
-                        loc_amb = glGetUniformLocation(prog, 'uAmbient')
-                        if loc_amb != -1:
-                            glUniform3fv(loc_amb, 1, ambient.astype(np.float32))
-                        loc_lcol = glGetUniformLocation(prog, 'uLightColor')
-                        if loc_lcol != -1:
-                            glUniform3fv(loc_lcol, 1, light_diffuse.astype(np.float32))
-                        # try to set point-light arrays if present
-                        loc_lcount = glGetUniformLocation(prog, 'uLightCount')
-                        if loc_lcount != -1 and lights is not None:
-                            count = min(len(lights), 4)
-                            glUniform1i(loc_lcount, count)
-                            # positions
-                            loc_pos0 = glGetUniformLocation(prog, 'uLightPos[0]')
-                            if loc_pos0 != -1 and count > 0:
-                                flat = []
-                                for i in range(count): flat.extend(list(lights[i]['pos']))
-                                glUniform3fv(loc_pos0, count, (np.array(flat, dtype=np.float32)))
-                            loc_col0 = glGetUniformLocation(prog, 'uLightCol[0]')
-                            if loc_col0 != -1 and count > 0:
-                                flatc = []
-                                for i in range(count): flatc.extend(list(np.array(lights[i]['col']) * lights[i]['int']))
-                                glUniform3fv(loc_col0, count, (np.array(flatc, dtype=np.float32)))
-            except Exception:
-                # let errors surface during development if desired
-                raise
+            # pass collected point lights (if any) to shader wrapper
+            shader_obj.set_common(V, P, light_dir, ambient, light_diffuse, lights)
         
         # draw skybox first (if any)
         view_rot = V.copy()
