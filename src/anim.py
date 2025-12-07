@@ -113,33 +113,6 @@ def make_follow_camera(
     return follow
 
 
-def make_follow_camera_2(
-    get_car_matrix: Callable[[], np.ndarray], *,
-    offset_local=(-10.0, 4.0, 0.0), look_ahead=6.0,
-):
-    """Retorna função dt->(eye,center) que segue o carro suavemente."""
-    offset_local = np.array(offset_local, dtype=np.float32)
-    prev_eye = None
-
-    def follow(dt: float):
-        nonlocal prev_eye
-        m = get_car_matrix()
-        fwd = m[:3, 0]
-        fwd = fwd / np.linalg.norm(fwd)
-        pos = m[:3, 3]
-        off_world = pos + m[:3, :3] @ offset_local
-        target = pos + fwd * look_ahead
-        if prev_eye is None:
-            prev_eye = off_world
-            
-        eye = prev_eye + (off_world - prev_eye)
-        prev_eye = eye
-        return eye, target
-
-    return follow
-
-
-
 def make_sun_animator(
     sun_node,
     *,
@@ -147,18 +120,16 @@ def make_sun_animator(
     rotate,
     scale,
     orbit_radius=100.0,
-    orbit_period=80.0,
+    orbit_period=4.0,
     tilt_angle_deg=0.0,
 ) -> Callable[[float], None]:
-    """Retorna animador que faz o sol orbitar em círculo inclinado."""
-    tilt_rad = math.radians(tilt_angle_deg)
-    tilt_rot = rotate(tilt_rad, (0, 0, 1))
-
     def anim(node, dt: float):
         time = glfw.get_time()
         angle = (time / orbit_period) * 2.0 * math.pi
-        orbit_rot = rotate(angle, (0, 1, 0))
-        pos = orbit_rot @ tilt_rot @ np.array([orbit_radius, 0.0, 1.0, 0.0], dtype=np.float32)
+        # Orbitar em torno do eixo Z para simular nascer/pôr do sol (altera altura Y)
+        orbit_rot = rotate(angle, (0, 0, 1))
+        # Posição inicial no eixo X
+        pos = orbit_rot @ np.array([orbit_radius, 0.0, 0.0, 1.0], dtype=np.float32)
         m = translate(pos[0], pos[1], pos[2]) @ scale(2.0, 2.0, 2.0)
         sun_node.local = m
 

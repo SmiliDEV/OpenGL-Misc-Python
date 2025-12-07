@@ -228,7 +228,7 @@ def build_scene(window, meshes: dict, materials: dict):
     sun_node = Node('Sun', local=translate(0.0, 9.0, 2.0) @ scale(0.6, 0.6, 0.6), mesh=sun_mesh)
     sun_node.is_light = True
     sun_node.light_color = np.array([1.0, 0.95, 0.8], dtype=np.float32)
-    sun_node.light_intensity = 2.0
+    sun_node.light_intensity = 1.5
     sun_node.material = materials.get('sun', None)
     sun_node.animator = anim.make_sun_animator(sun_node, translate=translate, rotate=rotate, scale=scale, orbit_radius=50.0, orbit_period=80.0, tilt_angle_deg=23.5)
 
@@ -486,12 +486,13 @@ def main():
         lag_seconds=0.18,
     )
 
-    # Orbital camera that circles the car — user can tweak with keys
+    # Camera dentro do carro (offset pequeno, sem smoothing)
     global follow_cam2
-    follow_cam2 = anim.make_follow_camera_2(
+    follow_cam2 = anim.make_follow_camera(
         lambda: car_node.local.copy(),
         offset_local=(-1.1, 3.0, -0.75),
         look_ahead=8.0,
+        lag_seconds=0.0
     )
 
 
@@ -499,8 +500,13 @@ def main():
     # dados globais da cena, camara e luz
     up  = np.array([0.0, 1.0, 0.0], dtype=np.float32)
 
-    ambient       = np.array([0.38, 0.38, 0.32], dtype=np.float32)   
-    light_diffuse = np.array([1.0, 1.0, 1.0], dtype=np.float32)  
+    # Configuração de Luzes (Dia vs Noite)
+    day_ambient   = np.array([0.25, 0.25, 0.30], dtype=np.float32)   # Menos intenso que antes
+    night_ambient = np.array([0.15, 0.15, 0.20], dtype=np.float32)   # Mais claro para se ver alguma coisa
+    day_diffuse   = np.array([0.9, 0.9, 0.9], dtype=np.float32)      # Luz do sol ligeiramente mais suave
+
+    ambient       = day_ambient.copy()
+    light_diffuse = day_diffuse.copy()
 
 
     light_dir = np.array([0.45, 0.9, 0.35], dtype=np.float32)
@@ -515,6 +521,9 @@ def main():
     sky = Skybox(shader_program=skybox_shader.prog, texture_folder=skybox_path)
 
     renderer = Renderer()
+    
+    # Encontrar o nó do Sol para atualizar a direção da luz
+    sun_node = root.find('Sun')
 
     last_time = glfw.get_time()
 
@@ -526,6 +535,10 @@ def main():
         deltaTime = current_time - last_time
         last_time = current_time
         fbw, fbh = window.get_framebuffer_size()
+
+        # Correção para evitar crash ao minimizar a janela (gravação/alt-tab)
+        if fbw == 0 or fbh == 0:
+            continue
 
         # Seleciona modo de camera — atualizar a free cam se necessário
         if cam.mode == 'free':
@@ -569,6 +582,23 @@ def main():
         uboPV.update_subdata(proj_arr.nbytes, view_arr)    # view @ offset 64 (16 floats * 4 bytes)
 
         root.update(deltaTime) # update the scene graph (animations, transforms, etc)
+
+        # Atualizar direção e intensidade da luz com base na posição do Sol
+        if sun_node:
+            sun_pos = sun_node.local[:3, 3]
+            norm = np.linalg.norm(sun_pos)
+            if norm > 1e-6:
+                light_dir = -sun_pos / norm
+            
+            # Calcular fator Dia/Noite baseado na altura do sol (Y)
+            # Transição suave entre Y=-10 (Noite total) e Y=10 (Dia total)
+            sun_height = sun_pos[1]
+            blend = (sun_height + 10.0) / 20.0
+            blend = max(0.0, min(1.0, blend))
+
+            # Misturar cores
+            ambient = night_ambient * (1.0 - blend) + day_ambient * blend
+            light_diffuse = day_diffuse * blend
 
         renderer.render(root, None, cam_eye, light_dir, ambient, default_shader=shader, common_setup=_common_setup)
 
