@@ -7,12 +7,11 @@ Este módulo NÃO conhece OpenGL diretamente; só transforma o estado
 import math
 from typing import Dict, Callable
 
-import glfw 
+import glfw
 import numpy as np
 
-from math3d import translate, rotate, scale
-
-from carro import Car, update_car
+from .math3d import translate, rotate, scale
+from .carro import Car, update_car
 
 # Helpers esperados serão injectados (translate, rotate, scale). Mantemos aqui só nomes.
 def make_car_animators(
@@ -29,7 +28,7 @@ def make_car_animators(
     def apply_transforms():
         m_car = translate(car_state.x, 0.0, car_state.z) @ rotate(-car_state.yaw, (0, 1, 0))
         car_node.local = m_car
-        
+
         for w in car_state.wheels:
             # Preferir correspondência exata pelo nome completo ('Wheel_FL') ou sufixo curto ('FL').
             # Se o nó não estiver presente na cena, pular a atualização dessa roda
@@ -51,7 +50,7 @@ def make_car_animators(
             m = (
                 translate(w.ox, w.oy, w.oz) @ r_steer @ r_x @ r_spin @ scale(w.radius, w.radius, w.width)
             )
-            
+
             node.local = m
 
         # Volante: encontrar um nó chamado 'SteeringWheel' em qualquer lugar sob o nó do carro
@@ -210,7 +209,7 @@ def make_plane_animator(node, center_pos, axis, radius, speed, height, scale_fac
     spin_angle = 0.0
     axis = np.array(axis, dtype=np.float32)
     axis /= np.linalg.norm(axis)
-    
+
     # Inicializar Rv_prev arbitrário (direita inicial do avião)
     Rv_prev = np.array([0, 0, 1], dtype=np.float32)
 
@@ -218,26 +217,26 @@ def make_plane_animator(node, center_pos, axis, radius, speed, height, scale_fac
         nonlocal angle, spin_angle, Rv_prev
         angle += dt * speed
         spin_angle += dt * spin_speed * 4
-        
+
         # --- 1. Posição na órbita ---
         p0 = np.array([radius, 0, 0, 1], dtype=np.float32)
         R_orbit = rotate(angle, axis)
         p = R_orbit @ p0
         P = np.array(center_pos, dtype=np.float32) + np.array([p[0], p[1]+height, p[2]], dtype=np.float32)
-        
+
         # --- 2. Tangente ---
         eps = 1e-3
         R_orbit2 = rotate(angle + eps, axis)
         p2 = R_orbit2 @ p0
         P2 = np.array(center_pos, dtype=np.float32) + np.array([p2[0], p2[1]+height, p2[2]], dtype=np.float32)
-        
+
         T = P2 - P
         T /= np.linalg.norm(T)
         T = -T  # inverter para frente do avião
-        
+
         # --- 3. Construir frame ortonormal ---
         U = axis
-        
+
         # Right (Rv) perpendicular a tangente e up
         Rv = np.cross(U, T)
         norm = np.linalg.norm(Rv)
@@ -246,18 +245,18 @@ def make_plane_animator(node, center_pos, axis, radius, speed, height, scale_fac
             Rv = Rv_prev
         else:
             Rv /= norm
-        
+
         # Garantir consistência: inverter se mudou de sinal
         if np.dot(Rv, Rv_prev) < 0:
             Rv = -Rv
         Rv_prev = Rv.copy()
-        
+
         # Up corrigido
         Uv = np.cross(T, Rv)
-        
+
         # --- 4. Spin sobre eixo local ---
         R_spin = rotate(spin_angle, Rv)  # spin sobre eixo direito (perpendicular à direção)
-        
+
         # --- 5. Matriz de orientação ---
         orient = np.array([
             [T[0], Uv[0], Rv[0], 0],
@@ -265,14 +264,14 @@ def make_plane_animator(node, center_pos, axis, radius, speed, height, scale_fac
             [T[2], Uv[2], Rv[2], 0],
             [0,    0,    0,    1]
         ], dtype=np.float32)
-        
+
         # --- 6. Escala e posição final ---
         S = scale(scale_factor, scale_factor, scale_factor)
         T_pos = translate(P[0], P[1], P[2])
-        
+
         # Rotação sobre o eixo Z local (roll) para o avião girar sobre si mesmo
         R_spin_local = rotate(spin_angle, np.array([1,0,0], dtype=np.float32))
-        
+
         # --- 7. Combinar matrizes ---
         # Ordem: Escala -> Spin Local -> Orientação na Trajetória -> Posição no Mundo
         n.local = T_pos @ orient @ R_spin_local @ S

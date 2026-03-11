@@ -1,14 +1,13 @@
+import glob
 import os
 from OpenGL.GL import *
 import numpy as np
 from PIL import Image
-from glib import *
-from file import get_content_of_file_project
+from .file import get_content_of_file_project
 
 import ctypes
-from node import Node
-import glob
-
+from .node import Node
+from .glib import *
 
 class Skybox:
     def load_cubemap(self, folder: str):
@@ -42,9 +41,9 @@ class Skybox:
 
     def __init__(self, shader_program: int, texture_folder: str = None):
         if texture_folder is None:
-            texture_folder = os.path.join(os.path.dirname(__file__), 'textures', 'skybox')
-        
-        self.cubemap_tex = self.load_cubemap(texture_folder)        
+            texture_folder = os.path.join(os.path.dirname(__file__), 'assets/textures', 'skybox')
+
+        self.cubemap_tex = self.load_cubemap(texture_folder)
         self.skybox_program = shader_program
         self.skybox_vertices = np.array([
             -1.0,  1.0, -1.0,

@@ -1,9 +1,8 @@
 import os
 from typing import List, Tuple, Optional, Dict
-
 import numpy as np
 
-from glib import Mesh, MeshTextured
+from .glib import Mesh, MeshTextured
 
 
 def _fix_index(i: int, arr_len: int) -> int:
@@ -146,7 +145,7 @@ def load_obj_multi(path: str, scale: float = 1.0, normalize: bool = False, targe
     positions = []
     texcoords = []
     normals = []
-    
+
     faces_by_mtl: Dict[str, List[List[Tuple[Optional[int], Optional[int], Optional[int]]]]] = {}
     current_mtl = 'default'
     faces_by_mtl[current_mtl] = []
@@ -218,13 +217,13 @@ def load_obj_multi(path: str, scale: float = 1.0, normalize: bool = False, targe
                     if vi is None: continue
                     vi_fixed = _fix_index(vi, len(positions))
                     pos = positions[vi_fixed]
-                    
+
                     if vni is not None:
                         vn_fixed = _fix_index(vni, len(normals))
                         n = normals[vn_fixed]
                     else:
                         n = (0.0, 0.0, 0.0)
-                    
+
                     if vti is not None:
                         vt_fixed = _fix_index(vti, len(texcoords))
                         uv = texcoords[vt_fixed]
@@ -237,7 +236,7 @@ def load_obj_multi(path: str, scale: float = 1.0, normalize: bool = False, targe
                     idx = len(unique)
                     unique[key] = idx
                 tri_indices.append(idx)
-            
+
             for i in range(1, len(tri_indices) - 1):
                 index_list.append(tri_indices[0])
                 index_list.append(tri_indices[i])
@@ -248,7 +247,7 @@ def load_obj_multi(path: str, scale: float = 1.0, normalize: bool = False, targe
 
         v_arr = np.asarray(vertex_list, dtype=np.float32)
         i_arr = np.asarray(index_list, dtype=np.uint32)
-        
+
         mesh = MeshTextured(v_arr.reshape(-1, 8).astype(np.float32).flatten(), i_arr, texture=None)
         result_meshes[mtl_name] = mesh
 

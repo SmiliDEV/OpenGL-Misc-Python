@@ -214,10 +214,10 @@ class UniformBuffer:
 
         if block_index == GL_INVALID_INDEX:
             raise RuntimeError(f"Uniform block '{block_name}' not found in program {program}.")
-        
+
         if self.binding_point is None:
             raise RuntimeError("UniformBuffer must have a binding_point to bind to shader block.")
-        
+
         glUniformBlockBinding(program, block_index, self.binding_point)
 
     def delete(self):
@@ -396,13 +396,13 @@ class Pipeline:
     def __init__(self, program, vertex_format: list[tuple[int, int, Constant, int]]):
         self.program = program
         self.vertex_format = vertex_format
-    
+
     def bind(self, vbo, ebo):
         vbo_id = vbo.id if hasattr(vbo, "id") else int(vbo) if vbo is not None else 0
         ebo_id = ebo.id if hasattr(ebo, "id") else int(ebo) if ebo is not None else 0
         vao = _vao_cache.get_or_create(self.program, self.vertex_format, vbo_id, ebo_id)
         glBindVertexArray(vao)
-        
+
 
 
 
@@ -418,7 +418,7 @@ from typing import Optional, List
 import numpy as np
 from OpenGL.GL import *
 
-from glib import Texture
+#from .glib import Texture
 
 class ShaderProgram:
     def __init__(self, vs_src: str, fs_src: str):
@@ -564,15 +564,15 @@ class ShaderProgram:
         if loc != -1:
             # the codebase produces row-major numpy matrices; request transpose so GLSL receives column-major
             glUniformMatrix4fv(loc, 1, GL_TRUE, mat)
-    
-    
+
+
 
     def destroy(self) -> None:
         glDeleteProgram(self.prog)
 
 def wrapperCreateShader(name: str) -> ShaderProgram:
-    vs_path = os.path.join(os.path.dirname(__file__), 'shaders', f'{name}.vert')
-    fs_path = os.path.join(os.path.dirname(__file__), 'shaders', f'{name}.frag')
+    vs_path = os.path.join(os.path.dirname(__file__), 'assets/shaders', f'{name}.vert')
+    fs_path = os.path.join(os.path.dirname(__file__), 'assets/shaders', f'{name}.frag')
     return ShaderProgram.from_files(vs_path, fs_path)
 
 class Mesh:
@@ -612,24 +612,24 @@ class MeshTextured:
         self.vbo = glGenBuffers(1)
         self.ebo = glGenBuffers(1)
         glBindVertexArray(self.vao)
-        
+
         glBindBuffer(GL_ARRAY_BUFFER, self.vbo)
         glBufferData(GL_ARRAY_BUFFER, interleaved.nbytes, interleaved, GL_STATIC_DRAW)
-        
+
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self.ebo)
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.nbytes, indices, GL_STATIC_DRAW)
-        
+
         stride = 8 * 4
-        
+
         glEnableVertexAttribArray(0)
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(0))
-        
+
         glEnableVertexAttribArray(1)
         glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(12))
 
         glEnableVertexAttribArray(2)
         glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(24))
-        
+
         glBindVertexArray(0)
 
     def draw(self) -> None:
