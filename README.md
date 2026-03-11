@@ -23,8 +23,8 @@ SPACEBAR: Change camera perspective
 ### 1. Clone
 
 ```bash
-git clone https://github.com/utilizador/nome-do-projeto.git
-cd Python-Misc-OpenGL
+git clone https://github.com/SmiliDEV/OpenGL-Misc-Python
+cd OpenGL-Python-Misc
 ```
 
 ### 2. Create and activate virtual environment
