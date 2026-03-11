@@ -1,4 +1,4 @@
-# Python-Misc-OpenGL
+# OpenGL-Misc-Python
 
 This is a simple project created to learn Python and computer graphics.
 In this project, node trees are implemented for hierarchical modeling with animations and rendering.
